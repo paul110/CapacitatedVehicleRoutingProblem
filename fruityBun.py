@@ -1,8 +1,18 @@
 import sys, random, math
 from collections import namedtuple
+import matplotlib.pyplot as plt
+import scipy.cluster.vq as clustering
+import numpy as np
+from scipy.cluster.vq import kmeans, vq
+import threading
+import gevent
+from gevent import Greenlet
+from multiprocessing import Process, Manager
 
-NR_PATHS    = 20
-ITERATIONS  = 100000
+NR_SOLUTIONS    = 10
+ITERATIONS      = 101
+TRUCKS          = 25
+PROCESSORS      = 4
 
 Coordinates = namedtuple("Coordinates", "x, y")
 CrossPair   = namedtuple("CrossPair", "sol1, sol2")
@@ -12,6 +22,7 @@ class Deposit:
         self.position   = position
         self.demand     = demand
         self.number     = number
+        self.label      = 0
 
 def findBestPair(truck):
     start = truck.route[1]
@@ -32,14 +43,13 @@ def findCrossOverPoint(solution):
     client1, client2 = findBestPair(truck)
     return truck_index, client1, client2
 
-
+# find position of client in a solution ( returns truck_inedx, path_index )
 def findPosition(client, solution):
     trucks = solution.trucks
-    for i in range(0,len(trucks)):
-        t = trucks[i]
-        for j in range(0, len(t.route)):
-            if t.route[j] == client:
-                return i, j
+    for truck in trucks:
+        for c in truck.route:
+            if c == client:
+                return trucks.index(truck), truck.route.index(c)
     return 0, 0
 
 def combineSolutions(s1, s2):
@@ -65,22 +75,19 @@ def crossOver(solutions):
         pairs.append(CrossPair(first, second))
 
     # can be paralelised easily
-    for i in range(0,len(pairs)):
-        first, second = combineSolutions(pairs[i].sol1, pairs[i].sol2)
+    for pair in pairs:
+        first, second = combineSolutions(pair.sol1, pair.sol2)
         solutions.append(first)
         solutions.append(second)
-
-
-
 
 class Solution:
     def __init__(self, trucks):
         self.trucks = trucks
         self.capacity_left = 0
         self.traveled = 0
-        for x in range(0, len(trucks)):
-            self.capacity_left += trucks[x].capacity
-            self.traveled += trucks[x].traveled
+        for truck in trucks:
+            self.capacity_left += truck.capacity
+            self.traveled += truck.traveled
         self.fitness = self.traveled
 
     # path_index = index of node which will stay there
@@ -89,51 +96,42 @@ class Solution:
     def changeNode(self, truck_index, path_index, dest_path_index, newClient, linkClient):
         # find the position of the node which will be placed at path_index_dest already has in the solution
         replace_truck_index, replace_path_index = findPosition(newClient,  self)
-        # print len(self.trucks[truck_index].route), path_index, dest_path_index
-        # print len(self.trucks[replace_truck_index].route), replace_path_index
-        # print self.traveled
+
         # remember the Client which is being taken out of the route
         backupClient    = self.trucks[truck_index].route[dest_path_index]
 
+        if(newClient.demand - backupClient.demand) > self.trucks[truck_index].capacity:
+            # print "WTF HAPPPENED"
+            return
         # replace client with the new one
         self.trucks[truck_index].route[dest_path_index] = newClient
-        # self.capacity_left -= newClient
 
         # modify the solution distance
         self.traveled += dist(newClient, linkClient) - dist(backupClient, linkClient)
         if dest_path_index - path_index > 0:
-            # print "prima"
             self.traveled += dist(newClient, self.trucks[truck_index].route[dest_path_index+1])
             self.traveled -= dist(backupClient, self.trucks[truck_index].route[dest_path_index+1])
         else :
-            # print "doua"
             self.traveled += dist(newClient, self.trucks[truck_index].route[dest_path_index-1])
             self.traveled -= dist(backupClient, self.trucks[truck_index].route[dest_path_index-1])
 
-
-        # find the duplic   ate node
-        # print self.trucks
-
         # replace duplicate node with missing node ( the back up )
         self.trucks[replace_truck_index].route[replace_path_index] = backupClient
-        # add new distances
 
+        # add new distances
         self.traveled += dist(backupClient, self.trucks[replace_truck_index].route[replace_path_index - 1])
         self.traveled -= dist(newClient, self.trucks[replace_truck_index].route[replace_path_index - 1])
         self.traveled += dist(backupClient, self.trucks[replace_truck_index].route[replace_path_index + 1])
         self.traveled -= dist(newClient, self.trucks[replace_truck_index].route[replace_path_index + 1])
 
         self.fitness = self.traveled
-        # print self.traveled
-        # substract old distances
-        # self.traveled -= ( dist(newClient, self.trucks[truck_index].route[path_index - 1]) + dist(newClient, self.trucks[truck_index].route[path_index + 1]) )
-
 
     def addLink(self, client1, client2):
         # find position of client1 node
         truck_index, p_index = findPosition(client1, self)
 
         route = self.trucks[truck_index].route
+
         # if change can be made in eiher direction
         if (p_index+1 < len(route)-1) and (p_index-1 > 0) :
             leftDistance    = 0
@@ -149,20 +147,25 @@ class Solution:
         else:
             if p_index+1 < len(route)-1:
                 self.changeNode(truck_index, p_index, p_index+1, client2, client1)
-
-            if p_index-1 > 1 :
-                self.changeNode(truck_index, p_index, p_index-1, client2, client1)
+            else :
+                if p_index-1 > 0 :
+                    self.changeNode(truck_index, p_index, p_index-1, client2, client1)
 
 class Truck:
     def __init__(self, capacity, deposit):
         self.capacity = capacity
         self.traveled = 0
-        self.route = [deposit]
+        self.route = [deposit, deposit]
 
     def addDestination(self, destination):
-        self.traveled += dist(self.route[-1], destination)
+        self.route.insert(len(self.route)-1, destination)
+
+        self.traveled += dist(self.route[-1], self.route[-2])
+        self.traveled += dist(self.route[-2], self.route[-3])
+
+        self.traveled -= dist(self.route[-1], self.route[-3])
+
         self.capacity -= destination.demand
-        self.route.append(destination)
 
 class Path:
     def compute_fitness(self):
@@ -208,60 +211,162 @@ def mergeSort(solutions):
 def dist(location1, location2):
     return math.sqrt( pow(location1.position.x - location2.position.x, 2) + pow(location1.position.y - location2.position.y, 2) )
 
+def get_clusters(deposits):
+    coords = map(lambda dep: [float(dep.position.x), float(dep.position.y)] , deposits)
+    y = np.array(coords)
+    codebook, _ = kmeans(y, 25)  # three clusters
+    cluster_indeces, _ = vq(y, codebook)
+
+    xpoints = [str(d.position.x) for d in deposits]
+    ypoints = [str(d.position.y) for d in deposits]
+
+    fig, ax = plt.subplots()
+    ax.scatter(xpoints, ypoints)
+
+    for i, ind in enumerate(cluster_indeces):
+        ax.annotate(ind, (xpoints[i],ypoints[i]))
+
+    # plt.show()
+    for i in range(0, len(cluster_indeces)):
+        deposits[i].label = cluster_indeces[i]
+
+    return cluster_indeces
+
+class generateRandSol(threading.Thread):
+    def __init__(self, deposits, capacity, labels):
+        threading.Thread.__init__(self)
+        self.deposits   = deposits
+        self.capacity   = capacity
+        self.labels     = labels
+    def run(self):
+        self.solution = generateRandomSolution(self.deposits, self.capacity, self.labels)
+
+    def join(self):
+        return self.solution
+
 def generateMultipleSolutions(deposits, capacity):
-    global NR_PATHS
-    solutions = []
-    for x in range(0, NR_PATHS):
-        temp_deposits = deposits[:]
-        solutions.append( generateRandomSolution( temp_deposits, capacity ) )
+    global NR_SOLUTIONS
+
+    # start with no solution
+    solutions   = []
+
+    # get labels of clusters for each deposit
+    labels = get_clusters(deposits)
+
+    manager = Manager()
+    solution = manager.dict()
+
+    randomSolution = []
+    for i in range(0,PROCESSORS):
+        randomSolution.append(0)
+
+    while len(solutions) < NR_SOLUTIONS :
+        for pid in range(0, PROCESSORS):
+            temp_deposits       = deposits[:]
+            randomSolution[pid]   = Process(target = generateRandomSolution, args=(temp_deposits, capacity, solution, pid, labels) )
+            randomSolution[pid].start()
+        for pid in range(0,PROCESSORS):
+            randomSolution[pid].join()
+            solutions.append(solution[pid])
+
     return solutions
 
-def generateRandomSolution(deposits, capacity):
+def generateRandomSolution(deposits, capacity, solution, sol_index, depo_labels = []):
+    global TRUCKS
     trucks = []
+
     startDeposit = deposits[0];
     deposits.remove(deposits[0])
 
-    trucks.append(Truck(capacity, startDeposit))
-    while(len(deposits) > 0):
-        allocated = 0
-        index = random.randint(0, len(deposits)-1)
-        for x in range(0, len(trucks)):
-            if trucks[x].capacity > deposits[index].demand :
-                trucks[x].addDestination(deposits[index])
-                allocated = 1
-                break
-        if not allocated :
-            trucks.append(Truck(capacity, startDeposit))
-            trucks[-1].addDestination(deposits[index])
+    # initialise all trucks
+    for i in range(0, TRUCKS):
+        trucks.append(Truck(capacity, startDeposit))
 
-        deposits.remove(deposits[index])
+    if len(depo_labels) == 0 :
+        while(len(deposits) > 0):
+            allocated = False
+            index = random.randint(0, len(deposits)-1)
+            for truck in trucks:
+                if truck.capacity >= deposits[index].demand :
+                    truck.addDestination(deposits[index])
+                    allocated = True
+                    break
 
-    for x in range(0, len(trucks)):
-        trucks[x].addDestination(startDeposit)
+            if not allocated :
+                trucks.append(Truck(capacity, startDeposit))
+                trucks[-1].addDestination(deposits[index])
 
-    return Solution(trucks);
+            deposits.remove(deposits[index])
+    else:
+        failed = []
+        while len(deposits) > 0 :
+            allocated = False
+            index = random.randint(0, len(deposits)-1)
+            label = deposits[index].label
+            if trucks[label].capacity >= deposits[index].demand:
+                trucks[label].addDestination(deposits[index])
+                allocated = True
+            else:
+                failed.append(deposits[index])
+
+            deposits.remove( deposits[index] )
+
+        while len(failed) > 0 :
+            attempt = False
+            for truck in trucks:
+                if truck.capacity >= failed[0].demand :
+                    truck.addDestination(failed[0])
+                    failed.remove(failed[0])
+                    attempt = True
+                    break
+            if not attempt :
+                trucks.append(Truck(capacity, startDeposit))
+                trucks[-1].addDestination(failed[0])
+                failed.remove(failed[0])
+
+    solution[sol_index] = Solution(trucks)
 
 def findFittestPath(paths):
     best = paths[0]
-    for x in range(1,len(paths)-1):
-        if(paths[x].fitness < best.fitness):
-            best = paths[x]
+    for path in paths:
+        if(path.fitness < best.fitness):
+            best = path
     return best
 
 def printSolutions(solutions):
-    for i in range(0, NR_PATHS):
-        print "travelled: " + str(solutions[i].traveled) + "   capacity: " + str(solutions[i].capacity_left)
-        trucks = solutions[i].trucks
-        # for j in range(0, len(trucks)):
-        #     start, end = findBestPair(trucks[j])
-        #     print "truck:" +  str(j) +"   "  + str(start.number) + "--"+ str(end.number) + " = "+ str(dist(start,end))
+    for s in solutions:
+        print "traveled: %5.4f with %2d trucks and %4d capacity left" %(s.traveled, len(s.trucks), s.capacity_left)
+        trucks = s.trucks
+
+
+def finePrint(solution):
+    f = open('best-solution.txt', 'w')
+    f.write("login pp13003 21124\n")
+    f.write("name Paul Pintilie\n")
+    f.write("algorithm Genetic Algorithm with specialized crossover and mutation\n")
+    f.write("cost "+ str(solution.fitness) + "\n")
+    for truck in solution.trucks:
+        a = map(lambda x: str(x.label+1), truck.route)
+        f.write("->".join(a) +  "\n")
+
 def printBestSolution(solutions):
     best = solutions[0]
-    for i in range(1, len(solutions)):
-        if solutions[i].fitness < best.fitness :
-            best = solutions[i]
+    for sol in solutions:
+        if sol.fitness < best.fitness :
+            best = sol
 
     print "top solution: " + str(best.fitness )
+    finePrint(best)
+    # plotPoints(best)
+
+def plotPoints(sol):
+
+    xpoints = [str(dest.position.x) for dest in sol.trucks[0].route]
+    ypoints = [str(dest.position.y) for dest in sol.trucks[0].route]
+
+    print xpoints[0]
+    plt.scatter(xpoints, ypoints)
+    plt.show()
 
 def findPath(deposits, capacity):
     global ITERATIONS
@@ -269,21 +374,11 @@ def findPath(deposits, capacity):
     solutions = generateMultipleSolutions(deposits, capacity)
     # sor population based on fitness
     printSolutions(solutions)
+    printBestSolution(solutions)
     for i in range(0, ITERATIONS):
-        # first = random.randint(0, len(solutions)-1)
-        # while True:
-        #     second = random.randint(0,len(solutions)-1)
-        #     if second != first:
-        #         break
         crossOver(solutions)
-        # crossOver(solutions[first], solutions[second])
         if i%100 == 0  :
             printBestSolution(solutions)
-    print "--------------------"
-    # mergeSort(solutions)
-    # printSolutions(solutions)
-
-
 
     return solutions
 
