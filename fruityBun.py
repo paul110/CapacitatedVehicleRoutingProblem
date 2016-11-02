@@ -9,8 +9,9 @@ import gevent
 from gevent import Greenlet
 from multiprocessing import Process, Manager
 
-NR_SOLUTIONS    = 10
-ITERATIONS      = 101
+TOP_SOLUTIONS   = 4
+NR_SOLUTIONS    = 40
+ITERATIONS      = 10000
 TRUCKS          = 25
 PROCESSORS      = 4
 
@@ -27,9 +28,10 @@ class Deposit:
 def findBestPair(truck):
     start = truck.route[1]
     end = truck.route[2]
-    best_dist = dist(truck.route[0], truck.route[1])
-    for i in range(3, len(truck.route)-1):
+    best_dist = dist(truck.route[1], truck.route[2])
+    for i in range(3, len(truck.route)-2):
         if dist(truck.route[i-1], truck.route[i]) < best_dist:
+
             best_dist   = dist(truck.route[i-1], truck.route[i])
             start       = truck.route[i-1]
             end         = truck.route[i]
@@ -37,39 +39,52 @@ def findBestPair(truck):
 
 # always returns the client from which the route
 def findCrossOverPoint(solution):
-    truck_index = random.randint(0, len(solution.trucks)-1)
-    truck       = solution.trucks[truck_index]
+    while True:
+        truck_index = random.randint(0, len(solution.trucks)-1)
+        truck       = solution.trucks[truck_index]
+        if len(truck.route) > 3:
+            break
 
     client1, client2 = findBestPair(truck)
-    return truck_index, client1, client2
+    if client1.number == 0 or client2.number == 0 :
+        print "TATA", client1.number, client2.number
+
+    return client1, client2
 
 # find position of client in a solution ( returns truck_inedx, path_index )
 def findPosition(client, solution):
     trucks = solution.trucks
-    for truck in trucks:
-        for c in truck.route:
-            if c == client:
-                return trucks.index(truck), truck.route.index(c)
+    for i in range(0, len(trucks)):
+        for j in range(0, len(trucks[i].route)):
+            if trucks[i].route[j].number == client.number :
+                return i, j
     return 0, 0
 
 def combineSolutions(s1, s2):
-    s1_truck, s1_client_1, s1_client_2  = findCrossOverPoint(s1)
-    s2_truck, s2_client_1, s2_client_2  = findCrossOverPoint(s2)
+    s1_client_1, s1_client_2  = findCrossOverPoint(s1)
+    s2_client_1, s2_client_2  = findCrossOverPoint(s2)
 
-    s1.addLink(s2_client_1, s2_client_2)
-    s2.addLink(s1_client_1, s1_client_2)
-    return s1,s2
+    scopy1 = Solution(s1.trucks)
+    scopy2 = Solution(s2.trucks)
+    scopy1.addLink(s2_client_1, s2_client_2)
+    scopy2.addLink(s1_client_1, s1_client_2)
+    return scopy1,scopy2
+
+def chooseSolution(sol1, sol2):
+    if sol1.fitness > sol2.fitness :
+        return sol2
+    else:
+        return sol1
 
 # crossover between 2 solution
 def crossOver(solutions):
+    # print "--------CROSSOVER--------"
     pairs = []
-    while(len(solutions) > 2):
-        first = random.randint(0, len(solutions)-1)
-        first = solutions[first]
+    while(len(solutions) > 1):
+        first = solutions[0]
         solutions.remove(first)
 
-        second = random.randint(0,len(solutions)-1)
-        second = solutions[second]
+        second = solutions[-1]
         solutions.remove(second)
 
         pairs.append(CrossPair(first, second))
@@ -77,8 +92,11 @@ def crossOver(solutions):
     # can be paralelised easily
     for pair in pairs:
         first, second = combineSolutions(pair.sol1, pair.sol2)
-        solutions.append(first)
-        solutions.append(second)
+        # print first.fitness, second.fitness, pair.sol1.fitness, pair.sol2.fitness
+        solutions.append(chooseSolution(first, pair.sol1))
+        solutions.append(chooseSolution(second, pair.sol2))
+
+# def crossOver2(solutions):
 
 class Solution:
     def __init__(self, trucks):
@@ -94,15 +112,20 @@ class Solution:
     # path_index_dest = index of node which will be changed
     # newClient = node which will be placed at the path_index_dest
     def changeNode(self, truck_index, path_index, dest_path_index, newClient, linkClient):
+
         # find the position of the node which will be placed at path_index_dest already has in the solution
         replace_truck_index, replace_path_index = findPosition(newClient,  self)
+        # finePrint(self)
+
+        # if replace_path_index == 0 :
+        #     print "NU BINE", newClient.number
 
         # remember the Client which is being taken out of the route
         backupClient    = self.trucks[truck_index].route[dest_path_index]
 
-        if(newClient.demand - backupClient.demand) > self.trucks[truck_index].capacity:
-            # print "WTF HAPPPENED"
-            return
+        # if(newClient.demand - backupClient.demand) > self.trucks[truck_index].capacity:
+        #     print "WTF HAPPPENED"
+        #     return
         # replace client with the new one
         self.trucks[truck_index].route[dest_path_index] = newClient
 
@@ -116,6 +139,7 @@ class Solution:
             self.traveled -= dist(backupClient, self.trucks[truck_index].route[dest_path_index-1])
 
         # replace duplicate node with missing node ( the back up )
+
         self.trucks[replace_truck_index].route[replace_path_index] = backupClient
 
         # add new distances
@@ -246,6 +270,10 @@ class generateRandSol(threading.Thread):
 
 def generateMultipleSolutions(deposits, capacity):
     global NR_SOLUTIONS
+    global PROCESSORS
+
+    if NR_SOLUTIONS < PROCESSORS :
+        PROCESSORS = NR_SOLUTIONS
 
     # start with no solution
     solutions   = []
@@ -255,6 +283,7 @@ def generateMultipleSolutions(deposits, capacity):
 
     manager = Manager()
     solution = manager.dict()
+    # solution = []
 
     randomSolution = []
     for i in range(0,PROCESSORS):
@@ -338,7 +367,6 @@ def printSolutions(solutions):
         print "traveled: %5.4f with %2d trucks and %4d capacity left" %(s.traveled, len(s.trucks), s.capacity_left)
         trucks = s.trucks
 
-
 def finePrint(solution):
     f = open('best-solution.txt', 'w')
     f.write("login pp13003 21124\n")
@@ -350,13 +378,26 @@ def finePrint(solution):
         f.write("->".join(a) +  "\n")
 
 def printBestSolution(solutions):
-    best = solutions[0]
-    for sol in solutions:
-        if sol.fitness < best.fitness :
-            best = sol
+    global TOP_SOLUTIONS
+    best = []
+    if len(solutions) < TOP_SOLUTIONS:
+        TOP_SOLUTIONS = len(solutions)
 
-    print "top solution: " + str(best.fitness )
-    finePrint(best)
+    for i in range(0, TOP_SOLUTIONS):
+        best.append(solutions[i])
+
+    mergeSort(best)
+
+    for sol in solutions[TOP_SOLUTIONS:]:
+        for i in range(0, TOP_SOLUTIONS):
+            if best[i].fitness > sol.fitness :
+                best.insert( i, sol )
+                break
+
+    top = map(lambda x: str(x.fitness), best[:TOP_SOLUTIONS])
+    print "top solutions: " + " ".join(top)
+    # print "top solution: " + str(best.fitness )
+    finePrint(best[0])
     # plotPoints(best)
 
 def plotPoints(sol):
@@ -377,7 +418,7 @@ def findPath(deposits, capacity):
     printBestSolution(solutions)
     for i in range(0, ITERATIONS):
         crossOver(solutions)
-        if i%100 == 0  :
+        if i%10 == 0  :
             printBestSolution(solutions)
 
     return solutions
@@ -394,7 +435,6 @@ if __name__ == "__main__":
     deposits    = []
     coords      = []
 
-
     # read coordinates
     line = inputFile.readline().strip("\n")
     while( line != "DEMAND_SECTION" ):
@@ -410,6 +450,7 @@ if __name__ == "__main__":
     for x in range(1, len(coords)+1):
         line = map(int, inputFile.readline().strip("\n").split(" "))
         deposits.append(Deposit(coords[line[0]-1], line[1], x-1))
+
     print "Read " + str(len(deposits)) +  " coordinates"
 
     path = findPath(deposits, capacity)
