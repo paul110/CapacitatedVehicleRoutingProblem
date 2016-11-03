@@ -9,9 +9,10 @@ import gevent
 from gevent import Greenlet
 from multiprocessing import Process, Manager
 
-TOP_SOLUTIONS   = 4
-NR_SOLUTIONS    = 40
-ITERATIONS      = 10000
+TOP_SOLUTIONS   = 3
+NR_SOLUTIONS    = 20
+MUTATION_RATIO  = 1
+ITERATIONS      = 2000
 TRUCKS          = 25
 PROCESSORS      = 4
 
@@ -29,6 +30,9 @@ def findBestPair(truck):
     start = truck.route[1]
     end = truck.route[2]
     best_dist = dist(truck.route[1], truck.route[2])
+    # pos = random.randint(1, len(truck.route)-3)
+    # start = truck.route[pos]
+    # end   = truck.route[pos+1]
     for i in range(3, len(truck.route)-2):
         if dist(truck.route[i-1], truck.route[i]) < best_dist:
 
@@ -46,8 +50,6 @@ def findCrossOverPoint(solution):
             break
 
     client1, client2 = findBestPair(truck)
-    if client1.number == 0 or client2.number == 0 :
-        print "TATA", client1.number, client2.number
 
     return client1, client2
 
@@ -72,8 +74,10 @@ def combineSolutions(s1, s2):
 
 def chooseSolution(sol1, sol2):
     if sol1.fitness > sol2.fitness :
+        # print sol2.fitness
         return sol2
     else:
+        # print sol1.fitness
         return sol1
 
 # crossover between 2 solution
@@ -81,10 +85,10 @@ def crossOver(solutions):
     # print "--------CROSSOVER--------"
     pairs = []
     while(len(solutions) > 1):
-        first = solutions[0]
+        first = solutions[random.randint(0, len(solutions)-1)]
         solutions.remove(first)
 
-        second = solutions[-1]
+        second = solutions[random.randint(0, len(solutions)-1)]
         solutions.remove(second)
 
         pairs.append(CrossPair(first, second))
@@ -92,11 +96,115 @@ def crossOver(solutions):
     # can be paralelised easily
     for pair in pairs:
         first, second = combineSolutions(pair.sol1, pair.sol2)
-        # print first.fitness, second.fitness, pair.sol1.fitness, pair.sol2.fitness
+        # print first.fitness, pair.sol1.fitness, second.fitness, pair.sol2.fitness
         solutions.append(chooseSolution(first, pair.sol1))
         solutions.append(chooseSolution(second, pair.sol2))
 
+
+def mutate(sol):
+    node = None
+    truck_index = 0
+    for t in sol.trucks:
+        if t.capacity < 0:
+            sol.traveled -= t.traveled
+            node = t.removeNode()
+            sol.traveled += t.traveled
+            truck_index = sol.trucks.index(t)
+            break
+    if node is None :
+        return
+
+    for i in range(0, len(sol.trucks)):
+        if i != truck_index and sol.trucks[i].capacity > node.demand :
+            sol.traveled -= sol.trucks[i].traveled
+            sol.trucks[i].addDestination( node )
+            sol.traveled += sol.trucks[i].traveled
+            break
+    sol.fitness = sol.traveled
+
+def mutations(solutions) :
+    mutations = 0
+    while mutations < len(solutions)/MUTATION_RATIO -1 :
+        mutations +=1
+        index = random.randint(0, len(solutions)-1)
+        mutate(solutions[index])
+
 # def crossOver2(solutions):
+
+class Permutation:
+    def __init__(self, deposit, destinations, capacity):
+        self.deposit        = deposit
+        self.destinations    = destinations
+        self.truck_capacity = capacity
+        self.fitness        = 0
+        self.up_to_date     = False
+
+        self.update()
+
+
+    def update(self):
+        if not self.up_to_date :
+            self.computeFitness(self.destinations)
+            self.up_to_date = True
+
+    def computeFitness(self, destinations):
+        capacity        = self.truck_capacity - destinations[0].demand
+        self.fitness    = dist(self.deposit, destinations[0])
+
+        for i in range(0, len(destinations)-1):
+            nextDest = destinations[i+1]
+            previousDest = destinations[i]
+
+            if nextDest.demand > capacity:
+                # go to deposit first and then to next destination
+                self.fitness += dist(previousDest, self.deposit)
+
+                # reset capacity
+                capacity = self.truck_capacity
+
+                # update preious destination
+                previousDest = self.deposit
+
+            # update capacity
+            capacity -= nextDest.demand
+
+            # travel to next destination
+            self.fitness += dist(previousDest, nextDest)
+
+        # go back to deposit
+        self.fitness += dist(destinations[-1], self.deposit)
+
+    def filePrint(self) :
+        f = open('best-solution.txt', 'w')
+        f.write("login pp13003 68443\n")
+        f.write("name Paul Pintilie\n")
+        f.write("algorithm Genetic Algorithm with specialized crossover and mutation\n")
+        f.write("cost "+ str(self.fitness) + "\n")
+        string = "1->" +str( self.destinations[0].number + 1 )
+        capacity = self.truck_capacity - self.destinations[0].demand
+        for i in range(0, len(self.destinations)-1):
+            nextDest = self.destinations[i+1]
+            previousDest = self.destinations[i]
+
+            if nextDest.demand > capacity:
+                # go to deposit first and then to next destination
+                string += "->1\n1"
+                # reset capacity
+                capacity = self.truck_capacity
+
+                # update preious destination
+                previousDest = self.deposit
+
+            # update capacity
+            capacity -= nextDest.demand
+
+            # travel to next destination
+            string += "->" + str(nextDest.number+1)
+
+        # go back to deposit
+        # self.fitness += dist(self.destinations[-1], self.deposit)
+        string += "->" + str(self.deposit.number+1) + "\n"
+        f.write(string)
 
 class Solution:
     def __init__(self, trucks):
@@ -115,42 +223,22 @@ class Solution:
 
         # find the position of the node which will be placed at path_index_dest already has in the solution
         replace_truck_index, replace_path_index = findPosition(newClient,  self)
-        # finePrint(self)
-
-        # if replace_path_index == 0 :
-        #     print "NU BINE", newClient.number
 
         # remember the Client which is being taken out of the route
-        backupClient    = self.trucks[truck_index].route[dest_path_index]
+        backupClient = self.trucks[truck_index].route[dest_path_index]
 
-        # if(newClient.demand - backupClient.demand) > self.trucks[truck_index].capacity:
-        #     print "WTF HAPPPENED"
-        #     return
-        # replace client with the new one
-        self.trucks[truck_index].route[dest_path_index] = newClient
+        self.traveled -= self.trucks[truck_index].traveled
+        self.trucks[truck_index].changeDestination(dest_path_index, newClient)
+        self.traveled += self.trucks[truck_index].traveled
 
-        # modify the solution distance
-        self.traveled += dist(newClient, linkClient) - dist(backupClient, linkClient)
-        if dest_path_index - path_index > 0:
-            self.traveled += dist(newClient, self.trucks[truck_index].route[dest_path_index+1])
-            self.traveled -= dist(backupClient, self.trucks[truck_index].route[dest_path_index+1])
-        else :
-            self.traveled += dist(newClient, self.trucks[truck_index].route[dest_path_index-1])
-            self.traveled -= dist(backupClient, self.trucks[truck_index].route[dest_path_index-1])
-
-        # replace duplicate node with missing node ( the back up )
-
-        self.trucks[replace_truck_index].route[replace_path_index] = backupClient
-
-        # add new distances
-        self.traveled += dist(backupClient, self.trucks[replace_truck_index].route[replace_path_index - 1])
-        self.traveled -= dist(newClient, self.trucks[replace_truck_index].route[replace_path_index - 1])
-        self.traveled += dist(backupClient, self.trucks[replace_truck_index].route[replace_path_index + 1])
-        self.traveled -= dist(newClient, self.trucks[replace_truck_index].route[replace_path_index + 1])
+        self.traveled -= self.trucks[replace_truck_index].traveled
+        self.trucks[replace_truck_index].changeDestination(replace_path_index, backupClient)
+        self.traveled += self.trucks[replace_truck_index].traveled
 
         self.fitness = self.traveled
 
     def addLink(self, client1, client2):
+
         # find position of client1 node
         truck_index, p_index = findPosition(client1, self)
 
@@ -174,6 +262,8 @@ class Solution:
             else :
                 if p_index-1 > 0 :
                     self.changeNode(truck_index, p_index, p_index-1, client2, client1)
+                else:
+                    print "CE ?"
 
 class Truck:
     def __init__(self, capacity, deposit):
@@ -186,10 +276,43 @@ class Truck:
 
         self.traveled += dist(self.route[-1], self.route[-2])
         self.traveled += dist(self.route[-2], self.route[-3])
-
         self.traveled -= dist(self.route[-1], self.route[-3])
 
         self.capacity -= destination.demand
+
+    def removeNode(self):
+        index = random.randint(1, len(self.route)-2)
+        node = self.route[index]
+        self.route.remove(self.route[index])
+
+        self.capacity += node.demand
+
+        self.traveled -= dist(self.route[-1], node)
+        self.traveled -= dist(self.route[-2], node)
+        self.traveled += dist(self.route[-1], self.route[-2])
+
+        return node
+
+    def addNode(self, index, node):
+        self.route.insert(index, node)
+
+        self.traveled += dist(node, self.route[index+1])
+        self.traveled += dist(node, self.route[index-1])
+        self.traveled -= dist(self.route[index+1], self.route[index-1])
+
+        self.capacity -= node.demand
+
+    def changeDestination(self, index, newNode):
+        # resotre capacity spent on previous destination
+        old_capacity = self.route[index].demand
+        self.capacity += old_capacity
+
+        old_distance        = dist(self.route[index], self.route[index+1]) + dist(self.route[index], self.route[index-1])
+        self.route[index]   = newNode
+        self.capacity -= newNode.demand
+        new_distance        = dist(self.route[index], self.route[index+1]) + dist(self.route[index], self.route[index-1])
+
+        self.traveled += new_distance - old_distance
 
 class Path:
     def compute_fitness(self):
@@ -283,13 +406,15 @@ def generateMultipleSolutions(deposits, capacity):
 
     manager = Manager()
     solution = manager.dict()
-    # solution = []
 
     randomSolution = []
     for i in range(0,PROCESSORS):
         randomSolution.append(0)
 
     while len(solutions) < NR_SOLUTIONS :
+        if NR_SOLUTIONS - len(solutions) < PROCESSORS :
+            PROCESSORS =  NR_SOLUTIONS - len(solutions)
+
         for pid in range(0, PROCESSORS):
             temp_deposits       = deposits[:]
             randomSolution[pid]   = Process(target = generateRandomSolution, args=(temp_deposits, capacity, solution, pid, labels) )
@@ -303,7 +428,7 @@ def generateMultipleSolutions(deposits, capacity):
 def generateRandomSolution(deposits, capacity, solution, sol_index, depo_labels = []):
     global TRUCKS
     trucks = []
-
+    destinations = []
     startDeposit = deposits[0];
     deposits.remove(deposits[0])
 
@@ -315,16 +440,7 @@ def generateRandomSolution(deposits, capacity, solution, sol_index, depo_labels 
         while(len(deposits) > 0):
             allocated = False
             index = random.randint(0, len(deposits)-1)
-            for truck in trucks:
-                if truck.capacity >= deposits[index].demand :
-                    truck.addDestination(deposits[index])
-                    allocated = True
-                    break
-
-            if not allocated :
-                trucks.append(Truck(capacity, startDeposit))
-                trucks[-1].addDestination(deposits[index])
-
+            destinations.append(deposits[index])
             deposits.remove(deposits[index])
     else:
         failed = []
@@ -352,8 +468,11 @@ def generateRandomSolution(deposits, capacity, solution, sol_index, depo_labels 
                 trucks.append(Truck(capacity, startDeposit))
                 trucks[-1].addDestination(failed[0])
                 failed.remove(failed[0])
+    for truck in trucks:
+        destinations.extend(truck.route[1:-1])
 
-    solution[sol_index] = Solution(trucks)
+
+    solution[sol_index] = Permutation(startDeposit, destinations, capacity)
 
 def findFittestPath(paths):
     best = paths[0]
@@ -363,9 +482,7 @@ def findFittestPath(paths):
     return best
 
 def printSolutions(solutions):
-    for s in solutions:
-        print "traveled: %5.4f with %2d trucks and %4d capacity left" %(s.traveled, len(s.trucks), s.capacity_left)
-        trucks = s.trucks
+    solutions[0].filePrint()
 
 def finePrint(solution):
     f = open('best-solution.txt', 'w')
@@ -374,8 +491,10 @@ def finePrint(solution):
     f.write("algorithm Genetic Algorithm with specialized crossover and mutation\n")
     f.write("cost "+ str(solution.fitness) + "\n")
     for truck in solution.trucks:
-        a = map(lambda x: str(x.label+1), truck.route)
-        f.write("->".join(a) +  "\n")
+        a = map(lambda x: str(x.number+1), truck.route)
+        f.write("->".join(a) + "\n")
+        # a = map(lambda x: str(x.label+1), truck.route)
+        # f.write("->".join(a) + "    cap: " + str(truck.capacity) +  "\n")
 
 def printBestSolution(solutions):
     global TOP_SOLUTIONS
@@ -397,7 +516,7 @@ def printBestSolution(solutions):
     top = map(lambda x: str(x.fitness), best[:TOP_SOLUTIONS])
     print "top solutions: " + " ".join(top)
     # print "top solution: " + str(best.fitness )
-    finePrint(best[0])
+    best[0].filePrint()
     # plotPoints(best)
 
 def plotPoints(sol):
@@ -411,15 +530,20 @@ def plotPoints(sol):
 
 def findPath(deposits, capacity):
     global ITERATIONS
+
     # generate start population
     solutions = generateMultipleSolutions(deposits, capacity)
+
     # sor population based on fitness
-    printSolutions(solutions)
+    # printSolutions(solutions)
     printBestSolution(solutions)
-    for i in range(0, ITERATIONS):
-        crossOver(solutions)
-        if i%10 == 0  :
-            printBestSolution(solutions)
+    #
+    # for i in range(0, ITERATIONS):
+    #     crossOver(solutions)
+    #     # mutations(solutions)
+    #     if i%10 == 0  :
+    #         printBestSolution(solutions)
+        # print "outside: "
 
     return solutions
 
