@@ -10,9 +10,9 @@ from gevent import Greenlet
 from multiprocessing import Process, Manager
 
 TOP_SOLUTIONS   = 3
-NR_SOLUTIONS    = 20
+NR_SOLUTIONS    = 10
 MUTATION_RATIO  = 1
-ITERATIONS      = 2000
+ITERATIONS      = 10000
 TRUCKS          = 25
 PROCESSORS      = 4
 
@@ -43,13 +43,19 @@ def findBestPair(truck):
 
 # always returns the client from which the route
 def findCrossOverPoint(solution):
-    while True:
-        truck_index = random.randint(0, len(solution.trucks)-1)
-        truck       = solution.trucks[truck_index]
-        if len(truck.route) > 3:
-            break
+    attempts = 1
+    bestDist = None
+    while attempts > 0:
+        attempts -= 1
+        index = random.randint(0, len(solution.destinations)-2)
 
-    client1, client2 = findBestPair(truck)
+        distance = dist(solution.destinations[index], solution.destinations[index+1])
+        if (bestDist is None) or (distance < bestDist) :
+            bestDist  = distance
+            bestIndex = index
+
+    client1 = solution.destinations[bestIndex]
+    client2 = solution.destinations[bestIndex+1]
 
     return client1, client2
 
@@ -66,18 +72,22 @@ def combineSolutions(s1, s2):
     s1_client_1, s1_client_2  = findCrossOverPoint(s1)
     s2_client_1, s2_client_2  = findCrossOverPoint(s2)
 
-    scopy1 = Solution(s1.trucks)
-    scopy2 = Solution(s2.trucks)
-    scopy1.addLink(s2_client_1, s2_client_2)
-    scopy2.addLink(s1_client_1, s1_client_2)
+    scopy1 = Permutation(s1.deposit, s1.destinations[:], s1.truck_capacity)
+    scopy2 = Permutation(s2.deposit, s2.destinations[:], s2.truck_capacity)
+
+    scopy1.linkDestinatios(s2_client_1, s2_client_2)
+    scopy2.linkDestinatios(s1_client_1, s1_client_2)
+
+    # print  s1.fitness, scopy1.fitness, s2.fitness, scopy2.fitness
+    # print  s1.fitness, scopy1.fitness, s2.fitness, scopy2.fitness
+
     return scopy1,scopy2
 
 def chooseSolution(sol1, sol2):
+
     if sol1.fitness > sol2.fitness :
-        # print sol2.fitness
         return sol2
     else:
-        # print sol1.fitness
         return sol1
 
 # crossover between 2 solution
@@ -96,9 +106,11 @@ def crossOver(solutions):
     # can be paralelised easily
     for pair in pairs:
         first, second = combineSolutions(pair.sol1, pair.sol2)
-        # print first.fitness, pair.sol1.fitness, second.fitness, pair.sol2.fitness
-        solutions.append(chooseSolution(first, pair.sol1))
-        solutions.append(chooseSolution(second, pair.sol2))
+
+        first = chooseSolution(first, pair.sol1)
+        second = chooseSolution(second, pair.sol2)
+
+        solutions.extend([first, second])
 
 
 def mutate(sol):
@@ -129,7 +141,6 @@ def mutations(solutions) :
         index = random.randint(0, len(solutions)-1)
         mutate(solutions[index])
 
-# def crossOver2(solutions):
 
 class Permutation:
     def __init__(self, deposit, destinations, capacity):
@@ -141,19 +152,35 @@ class Permutation:
 
         self.update()
 
-
     def update(self):
-        if not self.up_to_date :
-            self.computeFitness(self.destinations)
-            self.up_to_date = True
+        self.computeFitness()
 
-    def computeFitness(self, destinations):
-        capacity        = self.truck_capacity - destinations[0].demand
-        self.fitness    = dist(self.deposit, destinations[0])
+    def linkDestinatios(self, d1, d2):
+        self.up_to_date = False
 
-        for i in range(0, len(destinations)-1):
-            nextDest = destinations[i+1]
-            previousDest = destinations[i]
+        d1_index = 0
+        d2_index = 0
+
+
+        for i in range(0, len(self.destinations)):
+            # print i, len(self.destinations)
+            if d2.number == self.destinations[i].number :
+                d2_index = i
+            if d1.number == self.destinations[i].number :
+                d1_index = i
+
+        del self.destinations[d2_index]
+        self.destinations.insert(d1_index+1, d2)
+
+        self.update()
+
+    def computeFitness(self):
+        capacity        = self.truck_capacity - self.destinations[0].demand
+        self.fitness    = dist(self.deposit, self.destinations[0])
+
+        for i in range(0, len(self.destinations)-1):
+            nextDest = self.destinations[i+1]
+            previousDest = self.destinations[i]
 
             if nextDest.demand > capacity:
                 # go to deposit first and then to next destination
@@ -172,7 +199,7 @@ class Permutation:
             self.fitness += dist(previousDest, nextDest)
 
         # go back to deposit
-        self.fitness += dist(destinations[-1], self.deposit)
+        self.fitness += dist(self.destinations[-1], self.deposit)
 
     def filePrint(self) :
         f = open('best-solution.txt', 'w')
@@ -205,6 +232,7 @@ class Permutation:
         # self.fitness += dist(self.destinations[-1], self.deposit)
         string += "->" + str(self.deposit.number+1) + "\n"
         f.write(string)
+
 
 class Solution:
     def __init__(self, trucks):
@@ -474,33 +502,15 @@ def generateRandomSolution(deposits, capacity, solution, sol_index, depo_labels 
 
     solution[sol_index] = Permutation(startDeposit, destinations, capacity)
 
-def findFittestPath(paths):
-    best = paths[0]
-    for path in paths:
-        if(path.fitness < best.fitness):
-            best = path
-    return best
-
-def printSolutions(solutions):
-    solutions[0].filePrint()
-
-def finePrint(solution):
-    f = open('best-solution.txt', 'w')
-    f.write("login pp13003 21124\n")
-    f.write("name Paul Pintilie\n")
-    f.write("algorithm Genetic Algorithm with specialized crossover and mutation\n")
-    f.write("cost "+ str(solution.fitness) + "\n")
-    for truck in solution.trucks:
-        a = map(lambda x: str(x.number+1), truck.route)
-        f.write("->".join(a) + "\n")
-        # a = map(lambda x: str(x.label+1), truck.route)
-        # f.write("->".join(a) + "    cap: " + str(truck.capacity) +  "\n")
-
 def printBestSolution(solutions):
     global TOP_SOLUTIONS
     best = []
     if len(solutions) < TOP_SOLUTIONS:
         TOP_SOLUTIONS = len(solutions)
+
+    # update fitness
+    for sol in solutions:
+        sol.update()
 
     for i in range(0, TOP_SOLUTIONS):
         best.append(solutions[i])
@@ -515,9 +525,8 @@ def printBestSolution(solutions):
 
     top = map(lambda x: str(x.fitness), best[:TOP_SOLUTIONS])
     print "top solutions: " + " ".join(top)
-    # print "top solution: " + str(best.fitness )
+
     best[0].filePrint()
-    # plotPoints(best)
 
 def plotPoints(sol):
 
@@ -528,6 +537,18 @@ def plotPoints(sol):
     plt.scatter(xpoints, ypoints)
     plt.show()
 
+def test(solutions):
+    a = map(lambda x: str(x.fitness), solutions)
+    print "Solutions:"+ " ".join(a)
+
+    solutions[0].linkDestinatios(solutions[0].destinations[1],solutions[0].destinations[20])
+    print solutions[0].fitness
+    for sol in solutions :
+        sol.update()
+
+    a = map(lambda x: str(x.fitness), solutions)
+    print "Solutions:"+ " ".join(a)
+
 def findPath(deposits, capacity):
     global ITERATIONS
 
@@ -536,13 +557,14 @@ def findPath(deposits, capacity):
 
     # sor population based on fitness
     # printSolutions(solutions)
+
+    # test(solutions)
     printBestSolution(solutions)
-    #
-    # for i in range(0, ITERATIONS):
-    #     crossOver(solutions)
+    for i in range(0, ITERATIONS):
+        crossOver(solutions)
     #     # mutations(solutions)
-    #     if i%10 == 0  :
-    #         printBestSolution(solutions)
+        if i%10 == 0  :
+            printBestSolution(solutions)
         # print "outside: "
 
     return solutions
