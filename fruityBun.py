@@ -7,14 +7,19 @@ from scipy.cluster.vq import kmeans, vq
 import threading
 import gevent
 from gevent import Greenlet
-from multiprocessing import Process, Manager
+from multiprocessing import Process, Manager, Pool
+from threading import Thread
+
 
 TOP_SOLUTIONS   = 3
-NR_SOLUTIONS    = 10
-MUTATION_RATIO  = 1
+NR_SOLUTIONS    = 25
+MUTATION_RATIO  = 201
 ITERATIONS      = 10000
 TRUCKS          = 25
 PROCESSORS      = 4
+CHANGES         = 2
+THREADS         = 100
+REPLACE         = 50
 
 Coordinates = namedtuple("Coordinates", "x, y")
 CrossPair   = namedtuple("CrossPair", "sol1, sol2")
@@ -25,21 +30,6 @@ class Deposit:
         self.demand     = demand
         self.number     = number
         self.label      = 0
-
-def findBestPair(truck):
-    start = truck.route[1]
-    end = truck.route[2]
-    best_dist = dist(truck.route[1], truck.route[2])
-    # pos = random.randint(1, len(truck.route)-3)
-    # start = truck.route[pos]
-    # end   = truck.route[pos+1]
-    for i in range(3, len(truck.route)-2):
-        if dist(truck.route[i-1], truck.route[i]) < best_dist:
-
-            best_dist   = dist(truck.route[i-1], truck.route[i])
-            start       = truck.route[i-1]
-            end         = truck.route[i]
-    return start, end
 
 # always returns the client from which the route
 def findCrossOverPoint(solution):
@@ -59,32 +49,60 @@ def findCrossOverPoint(solution):
 
     return client1, client2
 
-# find position of client in a solution ( returns truck_inedx, path_index )
-def findPosition(client, solution):
-    trucks = solution.trucks
-    for i in range(0, len(trucks)):
-        for j in range(0, len(trucks[i].route)):
-            if trucks[i].route[j].number == client.number :
-                return i, j
-    return 0, 0
-
 def combineSolutions(s1, s2):
-    s1_client_1, s1_client_2  = findCrossOverPoint(s1)
-    s2_client_1, s2_client_2  = findCrossOverPoint(s2)
+    global CHANGES
+    scopy1 = Permutation(s1.deposit, s1.destinations[:], s1.truck_capacity)
+    scopy2 = Permutation(s2.deposit, s2.destinations[:], s2.truck_capacity)
+
+    for _ in range(CHANGES):
+        s1_client_1, s1_client_2  = findCrossOverPoint(s1)
+        scopy2.linkDestinatios(s1_client_1, s1_client_2)
+
+    for _ in range(CHANGES):
+        s2_client_1, s2_client_2  = findCrossOverPoint(s2)
+        scopy1.linkDestinatios(s2_client_1, s2_client_2)
+
+    return scopy1,scopy2
+
+def combineSolutions2(s1, s2):
+    c1 = random.randint(0, 23)
+    c2 = random.randint(0, 23)
 
     scopy1 = Permutation(s1.deposit, s1.destinations[:], s1.truck_capacity)
     scopy2 = Permutation(s2.deposit, s2.destinations[:], s2.truck_capacity)
 
-    scopy1.linkDestinatios(s2_client_1, s2_client_2)
-    scopy2.linkDestinatios(s1_client_1, s1_client_2)
+    scopy1.swapClusters(c1, c2)
+    scopy2.swapClusters(c1, c2)
 
-    # print  s1.fitness, scopy1.fitness, s2.fitness, scopy2.fitness
-    # print  s1.fitness, scopy1.fitness, s2.fitness, scopy2.fitness
+    # print s1.fitness, scopy1.fitness, s2.fitness, scopy2.fitness
 
-    return scopy1,scopy2
+    return scopy1, scopy2
+
+# uniform ordered permutation
+def UOX(s1, s2):
+    length = len(s1.destinations)
+    bits = ('{0:0'+str(length) + 'b}').format(random.getrandbits(length))
+
+    scopy1 =  Permutation(s1.deposit, s1.destinations[:], s1.truck_capacity)
+    start_index = None
+    elements    = []
+    # while string not
+    for i in range(0, len(bits)):
+        bit = int(bits[i])
+
+        if bit :
+            if start_index is None :
+                start_index = i
+
+            elements.append(s2.destinations[i])
+        else :
+            scopy1.insertElements(start_index, elements)
+            start_index = None
+            elements = []
+    return scopy1
+
 
 def chooseSolution(sol1, sol2):
-
     if sol1.fitness > sol2.fitness :
         return sol2
     else:
@@ -92,8 +110,8 @@ def chooseSolution(sol1, sol2):
 
 # crossover between 2 solution
 def crossOver(solutions):
-    # print "--------CROSSOVER--------"
-    pairs = []
+    pairs   = []
+    results = []
     while(len(solutions) > 1):
         first = solutions[random.randint(0, len(solutions)-1)]
         solutions.remove(first)
@@ -103,43 +121,32 @@ def crossOver(solutions):
 
         pairs.append(CrossPair(first, second))
 
-    # can be paralelised easily
-    for pair in pairs:
-        first, second = combineSolutions(pair.sol1, pair.sol2)
-
-        first = chooseSolution(first, pair.sol1)
-        second = chooseSolution(second, pair.sol2)
-
+    for i in range(0, len(pairs)):
+        first, second = combineSolutions2(pairs[i].sol1, pairs[i].sol2)
+        first = chooseSolution(first, pairs[i].sol1)
+        second = chooseSolution(second, pairs[i].sol2)
+        first1, second1 = combineSolutions(first, second)
+        first = chooseSolution(first, first1)
+        second = chooseSolution(second, second1)
         solutions.extend([first, second])
 
-
 def mutate(sol):
-    node = None
-    truck_index = 0
-    for t in sol.trucks:
-        if t.capacity < 0:
-            sol.traveled -= t.traveled
-            node = t.removeNode()
-            sol.traveled += t.traveled
-            truck_index = sol.trucks.index(t)
+    index1 = random.randint(0, len(sol.destinations)-1)
+    while True:
+        index2 = random.randint(0, len(sol.destinations)-1)
+        if index2 != index1 :
             break
-    if node is None :
-        return
+    sol.swapNodes(index1, index2)
 
-    for i in range(0, len(sol.trucks)):
-        if i != truck_index and sol.trucks[i].capacity > node.demand :
-            sol.traveled -= sol.trucks[i].traveled
-            sol.trucks[i].addDestination( node )
-            sol.traveled += sol.trucks[i].traveled
-            break
-    sol.fitness = sol.traveled
 
 def mutations(solutions) :
+    print "---- MUTATION ----"
     mutations = 0
     while mutations < len(solutions)/MUTATION_RATIO -1 :
         mutations +=1
         index = random.randint(0, len(solutions)-1)
         mutate(solutions[index])
+
 
 
 class Permutation:
@@ -154,6 +161,85 @@ class Permutation:
 
     def update(self):
         self.computeFitness()
+
+    def swapNodes(self, index1, index2):
+        self.up_to_date = False
+
+        aux = self.destinations[index1]
+        self.destinations[index1] = self.destinations[index2]
+        self.destinations[index2] = aux
+
+        self.update()
+
+    def swapClusters(self, c1, c2):
+        self.up_to_date = False
+        c1_start, c1_end = self.findCluster(c1)
+        c2_start, c2_end = self.findCluster(c2)
+
+        while c1_start < c1_end and c2_start < c2_end:
+            aux = self.destinations[c1_start]
+            self.destinations[c1_start] = self.destinations[c2_start]
+            self.destinations[c2_start] = aux
+            c1_start += 1
+            c2_start += 1
+
+        while c1_start < c1_end:
+            self.destinations.insert(c2_start, self.destinations[c1_start])
+            if c1_start > c2_start :
+                c1_start += 1
+                c2_start += 1
+            else :
+                c1_end -= 1
+
+            del self.destinations[c1_start]
+
+        while c2_start < c2_end:
+            self.destinations.insert(c1_start, self.destinations[c2_start])
+            if c2_start > c1_start :
+                c2_start += 1
+                c1_start += 1
+            else :
+                c2_end -= 1
+
+            del self.destinations[c2_start]
+
+        self.update()
+
+
+    def findCluster(self, cluster):
+        start = None
+        end =   None
+        for i in range(0, len(self.destinations)):
+            if self.destinations[i].label == cluster :
+                start = i
+                end = i
+                break
+        i = start
+        # print i, len(self.destinations), cluster
+        while i < len(self.destinations) and self.destinations[i].label == cluster:
+            end += 1
+            i   += 1
+
+        return start, end
+
+    # !!! does not trigger update automatically
+    def insertElements(self, index, elements):
+        self.up_to_date = False
+
+        removed = 0
+        for d in self.destinations :
+            for e in elements :
+                if e.number == d.number :
+                    self.destinations.remove(d)
+                    removed += 1
+                    break
+            if removed == len(elements) :
+                break
+
+        for i in range(0, len(elements)):
+            self.destinations.insert( index+i, elements[i] )
+
+        self.update()
 
     def linkDestinatios(self, d1, d2):
         self.up_to_date = False
@@ -233,66 +319,6 @@ class Permutation:
         string += "->" + str(self.deposit.number+1) + "\n"
         f.write(string)
 
-
-class Solution:
-    def __init__(self, trucks):
-        self.trucks = trucks
-        self.capacity_left = 0
-        self.traveled = 0
-        for truck in trucks:
-            self.capacity_left += truck.capacity
-            self.traveled += truck.traveled
-        self.fitness = self.traveled
-
-    # path_index = index of node which will stay there
-    # path_index_dest = index of node which will be changed
-    # newClient = node which will be placed at the path_index_dest
-    def changeNode(self, truck_index, path_index, dest_path_index, newClient, linkClient):
-
-        # find the position of the node which will be placed at path_index_dest already has in the solution
-        replace_truck_index, replace_path_index = findPosition(newClient,  self)
-
-        # remember the Client which is being taken out of the route
-        backupClient = self.trucks[truck_index].route[dest_path_index]
-
-        self.traveled -= self.trucks[truck_index].traveled
-        self.trucks[truck_index].changeDestination(dest_path_index, newClient)
-        self.traveled += self.trucks[truck_index].traveled
-
-        self.traveled -= self.trucks[replace_truck_index].traveled
-        self.trucks[replace_truck_index].changeDestination(replace_path_index, backupClient)
-        self.traveled += self.trucks[replace_truck_index].traveled
-
-        self.fitness = self.traveled
-
-    def addLink(self, client1, client2):
-
-        # find position of client1 node
-        truck_index, p_index = findPosition(client1, self)
-
-        route = self.trucks[truck_index].route
-
-        # if change can be made in eiher direction
-        if (p_index+1 < len(route)-1) and (p_index-1 > 0) :
-            leftDistance    = 0
-            rightDistance   = 0
-
-            leftDistance = dist(route[p_index], route[p_index-1])
-            rightDistance = dist(route[p_index], route[p_index+1])
-
-            if leftDistance > rightDistance :
-                self.changeNode(truck_index, p_index, p_index-1, client2, client1)
-            else:
-                self.changeNode(truck_index, p_index, p_index+1, client2, client1)
-        else:
-            if p_index+1 < len(route)-1:
-                self.changeNode(truck_index, p_index, p_index+1, client2, client1)
-            else :
-                if p_index-1 > 0 :
-                    self.changeNode(truck_index, p_index, p_index-1, client2, client1)
-                else:
-                    print "CE ?"
-
 class Truck:
     def __init__(self, capacity, deposit):
         self.capacity = capacity
@@ -342,17 +368,6 @@ class Truck:
 
         self.traveled += new_distance - old_distance
 
-class Path:
-    def compute_fitness(self):
-        distance = 0
-        for x in range(1, len(self.route)):
-            distance += dist(self.route[x-1], self.route[x])
-        return distance
-
-    def __init__(self, elements_order):
-        self.route = elements_order
-        self.fitness = self.compute_fitness()
-
 def mergeSort(solutions):
     if len(solutions) > 1 :
         mid         = len(solutions)//2
@@ -395,42 +410,24 @@ def get_clusters(deposits):
     xpoints = [str(d.position.x) for d in deposits]
     ypoints = [str(d.position.y) for d in deposits]
 
-    fig, ax = plt.subplots()
-    ax.scatter(xpoints, ypoints)
-
-    for i, ind in enumerate(cluster_indeces):
-        ax.annotate(ind, (xpoints[i],ypoints[i]))
-
-    # plt.show()
     for i in range(0, len(cluster_indeces)):
         deposits[i].label = cluster_indeces[i]
 
     return cluster_indeces
 
-class generateRandSol(threading.Thread):
-    def __init__(self, deposits, capacity, labels):
-        threading.Thread.__init__(self)
-        self.deposits   = deposits
-        self.capacity   = capacity
-        self.labels     = labels
-    def run(self):
-        self.solution = generateRandomSolution(self.deposits, self.capacity, self.labels)
-
-    def join(self):
-        return self.solution
-
-def generateMultipleSolutions(deposits, capacity):
-    global NR_SOLUTIONS
+def generateMultipleSolutions(deposits, capacity, nr_solutions, labels=None):
     global PROCESSORS
 
-    if NR_SOLUTIONS < PROCESSORS :
-        PROCESSORS = NR_SOLUTIONS
+    if nr_solutions < PROCESSORS :
+        PROCESSORS = nr_solutions
 
     # start with no solution
     solutions   = []
 
+
     # get labels of clusters for each deposit
-    labels = get_clusters(deposits)
+    if labels is None :
+        labels = get_clusters(deposits)
 
     manager = Manager()
     solution = manager.dict()
@@ -439,9 +436,9 @@ def generateMultipleSolutions(deposits, capacity):
     for i in range(0,PROCESSORS):
         randomSolution.append(0)
 
-    while len(solutions) < NR_SOLUTIONS :
-        if NR_SOLUTIONS - len(solutions) < PROCESSORS :
-            PROCESSORS =  NR_SOLUTIONS - len(solutions)
+    while len(solutions) < nr_solutions :
+        if nr_solutions - len(solutions) < PROCESSORS :
+            PROCESSORS =  nr_solutions - len(solutions)
 
         for pid in range(0, PROCESSORS):
             temp_deposits       = deposits[:]
@@ -451,7 +448,7 @@ def generateMultipleSolutions(deposits, capacity):
             randomSolution[pid].join()
             solutions.append(solution[pid])
 
-    return solutions
+    return solutions, labels
 
 def generateRandomSolution(deposits, capacity, solution, sol_index, depo_labels = []):
     global TRUCKS
@@ -460,7 +457,7 @@ def generateRandomSolution(deposits, capacity, solution, sol_index, depo_labels 
     startDeposit = deposits[0];
     deposits.remove(deposits[0])
 
-    # initialise all trucks
+    # initialise all trucks with start deposit
     for i in range(0, TRUCKS):
         trucks.append(Truck(capacity, startDeposit))
 
@@ -496,13 +493,15 @@ def generateRandomSolution(deposits, capacity, solution, sol_index, depo_labels 
                 trucks.append(Truck(capacity, startDeposit))
                 trucks[-1].addDestination(failed[0])
                 failed.remove(failed[0])
-    for truck in trucks:
-        destinations.extend(truck.route[1:-1])
 
+    while trucks :
+        index = random.randint(0, len(trucks)-1)
+        destinations.extend(trucks[index].route[1:-1])
+        del trucks[index]
 
     solution[sol_index] = Permutation(startDeposit, destinations, capacity)
 
-def printBestSolution(solutions):
+def printBestSolution(solutions, history):
     global TOP_SOLUTIONS
     best = []
     if len(solutions) < TOP_SOLUTIONS:
@@ -517,14 +516,21 @@ def printBestSolution(solutions):
 
     mergeSort(best)
 
+    avg = 0
+    for sol in solutions:
+        avg += sol.fitness
+    avg = avg / len(solutions)
+
     for sol in solutions[TOP_SOLUTIONS:]:
         for i in range(0, TOP_SOLUTIONS):
             if best[i].fitness > sol.fitness :
                 best.insert( i, sol )
                 break
 
+    history.append(best[0].fitness)
+
     top = map(lambda x: str(x.fitness), best[:TOP_SOLUTIONS])
-    print "top solutions: " + " ".join(top)
+    print "top solutions: " + " ".join(top) + "    avg: " + str(avg)
 
     best[0].filePrint()
 
@@ -537,36 +543,36 @@ def plotPoints(sol):
     plt.scatter(xpoints, ypoints)
     plt.show()
 
-def test(solutions):
-    a = map(lambda x: str(x.fitness), solutions)
-    print "Solutions:"+ " ".join(a)
+def regenerate(solutions, deposits, capacity, labels):
+    mergeSort(solutions)
 
-    solutions[0].linkDestinatios(solutions[0].destinations[1],solutions[0].destinations[20])
-    print solutions[0].fitness
-    for sol in solutions :
-        sol.update()
-
-    a = map(lambda x: str(x.fitness), solutions)
-    print "Solutions:"+ " ".join(a)
+    new_solutions, labels = generateMultipleSolutions(deposits, capacity, int(len(solutions)*REPLACE/100), labels)
+    print "regenerated solutions:", len(new_solutions)
+    for i in range(0, len(new_solutions)):
+        solutions[-i-1] = new_solutions[i]
+    # printBestSolution(new_solutions)
 
 def findPath(deposits, capacity):
     global ITERATIONS
+    history = []
 
     # generate start population
-    solutions = generateMultipleSolutions(deposits, capacity)
-
-    # sor population based on fitness
-    # printSolutions(solutions)
+    solutions, labels = generateMultipleSolutions(deposits, capacity, NR_SOLUTIONS)
 
     # test(solutions)
-    printBestSolution(solutions)
+    printBestSolution(solutions, history)
     for i in range(0, ITERATIONS):
         crossOver(solutions)
-    #     # mutations(solutions)
-        if i%10 == 0  :
-            printBestSolution(solutions)
-        # print "outside: "
 
+        if i%100 == 0  :
+            regenerate(solutions, deposits, capacity, labels)
+            mutations(solutions)
+        if i%10 == 0 :
+            printBestSolution(solutions, history)
+
+    # solutions[0].swapClusters(1,2)
+    plt.plot(range(len(history)), history)
+    plt.show()
     return solutions
 
 if __name__ == "__main__":
