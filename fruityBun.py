@@ -14,12 +14,12 @@ from threading import Thread
 TOP_SOLUTIONS   = 3
 NR_SOLUTIONS    = 25
 MUTATION_RATIO  = 201
-ITERATIONS      = 10000
+ITERATIONS      = 1000
 TRUCKS          = 25
 PROCESSORS      = 4
 CHANGES         = 2
 THREADS         = 100
-REPLACE         = 50
+REPLACE         = 10
 
 class Coordinates:
     def __init__(self, x, y):
@@ -82,15 +82,22 @@ def combineSolutions(s1, s2):
 
     return scopy1,scopy2
 
-def combineSolutions2(s1, s2):
+def combineSolutions2(s1, s2, clusterMatrix):
     c1 = random.randint(0, 23)
-    c2 = random.randint(0, 23)
-
+    c2 = clusterMatrix[c1][1]
+    # print c1, c2
     scopy1 = Permutation(s1.deposit, s1.destinations[:], s1.truck_capacity)
     scopy2 = Permutation(s2.deposit, s2.destinations[:], s2.truck_capacity)
 
+    c1_n = scopy1.getClusterNeighbours(c1)
+    # c2 = clusterMatrix[c1_n[-1]][1]
+    c2 = random.randint(0,23)
     scopy1.swapClusters(c1, c2)
+
+    c1_n = scopy2.getClusterNeighbours(c1)
+    # c2 = clusterMatrix[c1_n[-1]][random.randint(0,10)]
     scopy2.swapClusters(c1, c2)
+
 
     # print s1.fitness, scopy1.fitness, s2.fitness, scopy2.fitness
 
@@ -127,7 +134,7 @@ def chooseSolution(sol1, sol2):
         return sol1
 
 # crossover between 2 solution
-def crossOver(solutions):
+def crossOver(solutions, clusterMatrix):
     pairs   = []
     results = []
     while(len(solutions) > 1):
@@ -140,7 +147,7 @@ def crossOver(solutions):
         pairs.append(CrossPair(first, second))
 
     for i in range(0, len(pairs)):
-        first, second = combineSolutions2(pairs[i].sol1, pairs[i].sol2)
+        first, second = combineSolutions2(pairs[i].sol1, pairs[i].sol2, clusterMatrix)
         first = chooseSolution(first, pairs[i].sol1)
         second = chooseSolution(second, pairs[i].sol2)
         first1, second1 = combineSolutions(first, second)
@@ -186,6 +193,29 @@ class Permutation:
 
         self.update()
 
+    def getClusterNeighbours(self, cluster):
+        curr = 0
+        neighbours = []
+        i = 0
+        while i < len(self.destinations):
+            d = self.destinations[i]
+            if d.label == cluster:
+                neighbours.append(curr)
+                i += 1
+                while i < len(self.destinations) and d.label == cluster :
+                    d = self.destinations[i]
+                    i +=1
+
+                if d.label == cluster:
+                    break
+                else:
+                    neighbours.append(d.label)
+
+                break
+            curr = d.label
+            i+=1
+        return neighbours
+
     def swapClusters(self, c1, c2):
         self.up_to_date = False
         c1_start, c1_end = self.findCluster(c1)
@@ -224,16 +254,28 @@ class Permutation:
     def findCluster(self, cluster):
         start = None
         end =   None
-        for i in range(0, len(self.destinations)):
-            if self.destinations[i].label == cluster :
-                start = i
-                end = i
-                break
-        i = start
-        # print i, len(self.destinations), cluster
-        while i < len(self.destinations) and self.destinations[i].label == cluster:
-            end += 1
-            i   += 1
+        bottomSearch = random.randint(0,1)
+        if bottomSearch :
+            for i in range(0, len(self.destinations)):
+                if self.destinations[i].label == cluster :
+                    start = i
+                    end = i
+                    break
+            i = start
+            # print i, len(self.destinations), cluster
+            while i < len(self.destinations) and self.destinations[i].label == cluster:
+                end += 1
+                i   += 1
+        else:
+            for i in range(len(self.destinations)-1, -1, -1):
+                if self.destinations[i].label == cluster:
+                    end = i+1
+                    start = i
+                    break
+                i = start
+                while i >= 0 and self.destinations[i].label == cluster:
+                    start -= 1
+                    i -= 1
 
         return start, end
 
@@ -598,7 +640,17 @@ def printBestSolution(solutions, history):
     history.append(best[0].fitness)
 
     top = map(lambda x: str(x.fitness), best[:TOP_SOLUTIONS])
+
+    CURSOR_UP_ONE = '\x1b[1A'
+    ERASE_LINE = '\x1b[2K'
+    if len(history) != 1:
+        print CURSOR_UP_ONE + ERASE_LINE + CURSOR_UP_ONE
     print "top solutions: " + " ".join(top) + "    avg: " + str(avg)
+
+    length = 1.5
+    progress = len(history)*10 *100/ITERATIONS
+
+    print "Progress[" + "#" *int(progress/length) + " "*int((100-progress)/length) + "]"
 
     best[0].filePrint()
 
@@ -628,9 +680,8 @@ def findPath(deposits, capacity):
     solutions, labels, clusterMatrix = generateMultipleSolutions(deposits, capacity, NR_SOLUTIONS)
 
     # test(solutions)
-    printBestSolution(solutions, history)
     for i in range(0, ITERATIONS):
-        crossOver(solutions)
+        crossOver(solutions, clusterMatrix)
 
         if i%100 == 0  :
             regenerate(solutions, deposits, capacity, labels, clusterMatrix)
