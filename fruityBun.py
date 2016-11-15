@@ -21,8 +21,26 @@ CHANGES         = 2
 THREADS         = 100
 REPLACE         = 50
 
-Coordinates = namedtuple("Coordinates", "x, y")
+class Coordinates:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
 CrossPair   = namedtuple("CrossPair", "sol1, sol2")
+
+class Cluster :
+    def __init__(self, label, positions):
+        self.positions = positions
+        self.label = label
+        self.centre = Coordinates(0,0)
+        self.getCentre()
+
+    def getCentre(self):
+        for n in self.positions:
+            self.centre.x += n.x
+            self.centre.y += n.y
+        self.centre.x = self.centre.x/len(self.positions)
+        self.centre.y = self.centre.y/len(self.positions)
 
 class Deposit:
     def __init__(self, position, demand, number):
@@ -138,7 +156,6 @@ def mutate(sol):
             break
     sol.swapNodes(index1, index2)
 
-
 def mutations(solutions) :
     print "---- MUTATION ----"
     mutations = 0
@@ -146,8 +163,6 @@ def mutations(solutions) :
         mutations +=1
         index = random.randint(0, len(solutions)-1)
         mutate(solutions[index])
-
-
 
 class Permutation:
     def __init__(self, deposit, destinations, capacity):
@@ -401,7 +416,7 @@ def mergeSort(solutions):
 def dist(location1, location2):
     return math.sqrt( pow(location1.position.x - location2.position.x, 2) + pow(location1.position.y - location2.position.y, 2) )
 
-def get_clusters(deposits):
+def get_labels(deposits):
     coords = map(lambda dep: [float(dep.position.x), float(dep.position.y)] , deposits)
     y = np.array(coords)
     codebook, _ = kmeans(y, 25)  # three clusters
@@ -415,7 +430,57 @@ def get_clusters(deposits):
 
     return cluster_indeces
 
-def generateMultipleSolutions(deposits, capacity, nr_solutions, labels=None):
+def posDist(location1, location2):
+    return math.sqrt( pow(location1.x - location2.x, 2) + pow(location1.y - location2.y, 2) )
+
+def get_clusters(deposits, labels):
+    matrix = []
+    for d in deposits:
+        while len(matrix) <= d.label  :
+            matrix.append([])
+        matrix[d.label].append(d.position)
+
+    clusters = []
+    index = 0
+    for row in matrix:
+        clusters.append(Cluster(index, row))
+        index += 1
+    return clusters
+
+def createTableRow(clusters, index, matrix):
+    row = matrix[index]
+    order = []
+    for i in range(0, len(matrix)):
+        if len(order) == 0 :
+            order.append(i)
+        else:
+            j = 0
+            while j < len(order) and row[i] > row[order[j]] :
+                j +=1
+            if j == len(order):
+                order.append(i)
+            else :
+                order.insert(j, i)
+
+    return order
+
+
+def get_clusters_matrix(destinations, labels):
+    clusters  = get_clusters(destinations, labels)
+    matrix  = [ ]
+    for i in range(0, len(clusters)):
+        # print clusters[i].centre
+        matrix.append([])
+        for j in range(0, len(clusters)):
+            matrix[i].append(posDist(clusters[i].centre, clusters[j].centre))
+
+    lookUpTable = matrix[:]
+    for i in range(0, len(clusters)):
+        lookUpTable[i] = createTableRow(clusters, i, matrix)
+
+    return lookUpTable
+
+def generateMultipleSolutions(deposits, capacity, nr_solutions, labels=None, clustersMatrix=None):
     global PROCESSORS
 
     if nr_solutions < PROCESSORS :
@@ -427,7 +492,10 @@ def generateMultipleSolutions(deposits, capacity, nr_solutions, labels=None):
 
     # get labels of clusters for each deposit
     if labels is None :
-        labels = get_clusters(deposits)
+        labels = get_labels(deposits)
+
+    if clustersMatrix is None :
+        clustersMatrix = get_clusters_matrix(deposits, labels)
 
     manager = Manager()
     solution = manager.dict()
@@ -442,15 +510,15 @@ def generateMultipleSolutions(deposits, capacity, nr_solutions, labels=None):
 
         for pid in range(0, PROCESSORS):
             temp_deposits       = deposits[:]
-            randomSolution[pid]   = Process(target = generateRandomSolution, args=(temp_deposits, capacity, solution, pid, labels) )
+            randomSolution[pid]   = Process(target = generateRandomSolution, args=(temp_deposits, capacity, solution, pid, labels, clustersMatrix) )
             randomSolution[pid].start()
         for pid in range(0,PROCESSORS):
             randomSolution[pid].join()
             solutions.append(solution[pid])
 
-    return solutions, labels
+    return solutions, labels, clustersMatrix
 
-def generateRandomSolution(deposits, capacity, solution, sol_index, depo_labels = []):
+def generateRandomSolution(deposits, capacity, solution, sol_index, depo_labels = [], clustersMatrix = []):
     global TRUCKS
     trucks = []
     destinations = []
@@ -483,12 +551,12 @@ def generateRandomSolution(deposits, capacity, solution, sol_index, depo_labels 
 
         while len(failed) > 0 :
             attempt = False
-            for truck in trucks:
-                if truck.capacity >= failed[0].demand :
-                    truck.addDestination(failed[0])
-                    failed.remove(failed[0])
-                    attempt = True
-                    break
+            for i in range(1, len(clustersMatrix[failed[0].label])):
+                trucks[clustersMatrix[failed[0].label][i]].addDestination(failed[0])
+                failed.remove(failed[0])
+                attempt = True
+                break
+
             if not attempt :
                 trucks.append(Truck(capacity, startDeposit))
                 trucks[-1].addDestination(failed[0])
@@ -543,10 +611,10 @@ def plotPoints(sol):
     plt.scatter(xpoints, ypoints)
     plt.show()
 
-def regenerate(solutions, deposits, capacity, labels):
+def regenerate(solutions, deposits, capacity, labels, clusterMatrix):
     mergeSort(solutions)
 
-    new_solutions, labels = generateMultipleSolutions(deposits, capacity, int(len(solutions)*REPLACE/100), labels)
+    new_solutions, labels, clusterMatrix = generateMultipleSolutions(deposits, capacity, int(len(solutions)*REPLACE/100), labels, clusterMatrix)
     print "regenerated solutions:", len(new_solutions)
     for i in range(0, len(new_solutions)):
         solutions[-i-1] = new_solutions[i]
@@ -557,7 +625,7 @@ def findPath(deposits, capacity):
     history = []
 
     # generate start population
-    solutions, labels = generateMultipleSolutions(deposits, capacity, NR_SOLUTIONS)
+    solutions, labels, clusterMatrix = generateMultipleSolutions(deposits, capacity, NR_SOLUTIONS)
 
     # test(solutions)
     printBestSolution(solutions, history)
@@ -565,7 +633,7 @@ def findPath(deposits, capacity):
         crossOver(solutions)
 
         if i%100 == 0  :
-            regenerate(solutions, deposits, capacity, labels)
+            regenerate(solutions, deposits, capacity, labels, clusterMatrix)
             mutations(solutions)
         if i%10 == 0 :
             printBestSolution(solutions, history)
