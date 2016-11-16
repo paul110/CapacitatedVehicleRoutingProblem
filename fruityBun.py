@@ -10,75 +10,44 @@ from gevent import Greenlet
 from multiprocessing import Process, Manager, Pool
 from threading import Thread
 
+from cluster import Cluster
+from coordinates import Coordinates
+from deposit import Deposit
+from permutation import Permutation
+from truck import Truck
+
+from helperFunctions import *
 
 TOP_SOLUTIONS   = 3
-NR_SOLUTIONS    = 25
+NR_SOLUTIONS    = 100
 MUTATION_RATIO  = 201
-ITERATIONS      = 1000
+ITERATIONS      = 4000
 TRUCKS          = 25
 PROCESSORS      = 4
 CHANGES         = 2
 THREADS         = 100
 REPLACE         = 10
+NR_MUTATIONS    = 1
+MUTATION_RATE   = 0.4
 
-class Coordinates:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
 
 CrossPair   = namedtuple("CrossPair", "sol1, sol2")
 
-class Cluster :
-    def __init__(self, label, positions):
-        self.positions = positions
-        self.label = label
-        self.centre = Coordinates(0,0)
-        self.getCentre()
-
-    def getCentre(self):
-        for n in self.positions:
-            self.centre.x += n.x
-            self.centre.y += n.y
-        self.centre.x = self.centre.x/len(self.positions)
-        self.centre.y = self.centre.y/len(self.positions)
-
-class Deposit:
-    def __init__(self, position, demand, number):
-        self.position   = position
-        self.demand     = demand
-        self.number     = number
-        self.label      = 0
-
 # always returns the client from which the route
-def findCrossOverPoint(solution):
-    attempts = 1
-    bestDist = None
-    while attempts > 0:
-        attempts -= 1
-        index = random.randint(0, len(solution.destinations)-2)
 
-        distance = dist(solution.destinations[index], solution.destinations[index+1])
-        if (bestDist is None) or (distance < bestDist) :
-            bestDist  = distance
-            bestIndex = index
-
-    client1 = solution.destinations[bestIndex]
-    client2 = solution.destinations[bestIndex+1]
-
-    return client1, client2
 
 def combineSolutions(s1, s2):
     global CHANGES
     scopy1 = Permutation(s1.deposit, s1.destinations[:], s1.truck_capacity)
     scopy2 = Permutation(s2.deposit, s2.destinations[:], s2.truck_capacity)
 
-    for _ in range(CHANGES):
-        s1_client_1, s1_client_2  = findCrossOverPoint(s1)
-        scopy2.linkDestinatios(s1_client_1, s1_client_2)
+    # for _ in range(CHANGES):
+    s1_client_1, s1_client_2  = s1.findCrossOverPoint()
+    scopy2.linkDestinatios(s1_client_1, s1_client_2)
 
-    for _ in range(CHANGES):
-        s2_client_1, s2_client_2  = findCrossOverPoint(s2)
-        scopy1.linkDestinatios(s2_client_1, s2_client_2)
+    # for _ in range(CHANGES):
+    s2_client_1, s2_client_2  = s2.findCrossOverPoint()
+    scopy1.linkDestinatios(s2_client_1, s2_client_2)
 
     return scopy1,scopy2
 
@@ -90,16 +59,14 @@ def combineSolutions2(s1, s2, clusterMatrix):
     scopy2 = Permutation(s2.deposit, s2.destinations[:], s2.truck_capacity)
 
     c1_n = scopy1.getClusterNeighbours(c1)
-    # c2 = clusterMatrix[c1_n[-1]][1]
-    c2 = random.randint(0,23)
+    c2 = clusterMatrix[c1_n[-1]][random.randint(1,3)]
+    # c2 = random.randint(0,23)
     scopy1.swapClusters(c1, c2)
 
     c1_n = scopy2.getClusterNeighbours(c1)
-    # c2 = clusterMatrix[c1_n[-1]][random.randint(0,10)]
+
+    c2 = clusterMatrix[c1_n[-1]][random.randint(1,3)]
     scopy2.swapClusters(c1, c2)
-
-
-    # print s1.fitness, scopy1.fitness, s2.fitness, scopy2.fitness
 
     return scopy1, scopy2
 
@@ -126,7 +93,6 @@ def UOX(s1, s2):
             elements = []
     return scopy1
 
-
 def chooseSolution(sol1, sol2):
     if sol1.fitness > sol2.fitness :
         return sol2
@@ -150,313 +116,37 @@ def crossOver(solutions, clusterMatrix):
         first, second = combineSolutions2(pairs[i].sol1, pairs[i].sol2, clusterMatrix)
         first = chooseSolution(first, pairs[i].sol1)
         second = chooseSolution(second, pairs[i].sol2)
-        first1, second1 = combineSolutions(first, second)
-        first = chooseSolution(first, first1)
-        second = chooseSolution(second, second1)
+        for _ in range(CHANGES):
+            first1, second1 = combineSolutions(first, second)
+            first = chooseSolution(first, first1)
+            second = chooseSolution(second, second1)
         solutions.extend([first, second])
 
-def mutate(sol):
-    index1 = random.randint(0, len(sol.destinations)-1)
-    while True:
-        index2 = random.randint(0, len(sol.destinations)-1)
-        if index2 != index1 :
-            break
-    sol.swapNodes(index1, index2)
+def mutate(s1, clusterMatrix):
+    # scopy1 = Permutation(s1.deposit, s1.destinations[:], s1.truck_capacity)
+    for _ in range(NR_MUTATIONS):
+        # scopy1 = chooseSolution(scopy1, s1)
+        c1 = random.randint(0, 23)
+        c1_n = s1.getClusterNeighbours(c1)
+        c2 = clusterMatrix[c1_n[-1]][1]
+        # c2 = clusterMatrix[c1][random.randint(1, 10)]
+        # c2 = random.randint(1, 23)
+        s1.swapClusters(c1, c2)
 
-def mutations(solutions) :
-    print "---- MUTATION ----"
+    # return chooseSolution(s1, scopy1)
+
+def mutations(solutions, clusterMatrix) :
+    # print "---- MUTATION ----"
     mutations = 0
-    while mutations < len(solutions)/MUTATION_RATIO -1 :
-        mutations +=1
+    newSolutions = []
+    while( len(solutions) > 0 ):
         index = random.randint(0, len(solutions)-1)
-        mutate(solutions[index])
+        result = mutate(solutions[index],clusterMatrix)
+        del solutions[index]
+        newSolutions.append(result)
 
-class Permutation:
-    def __init__(self, deposit, destinations, capacity):
-        self.deposit        = deposit
-        self.destinations    = destinations
-        self.truck_capacity = capacity
-        self.fitness        = 0
-        self.up_to_date     = False
-
-        self.update()
-
-    def update(self):
-        self.computeFitness()
-
-    def swapNodes(self, index1, index2):
-        self.up_to_date = False
-
-        aux = self.destinations[index1]
-        self.destinations[index1] = self.destinations[index2]
-        self.destinations[index2] = aux
-
-        self.update()
-
-    def getClusterNeighbours(self, cluster):
-        curr = 0
-        neighbours = []
-        i = 0
-        while i < len(self.destinations):
-            d = self.destinations[i]
-            if d.label == cluster:
-                neighbours.append(curr)
-                i += 1
-                while i < len(self.destinations) and d.label == cluster :
-                    d = self.destinations[i]
-                    i +=1
-
-                if d.label == cluster:
-                    break
-                else:
-                    neighbours.append(d.label)
-
-                break
-            curr = d.label
-            i+=1
-        return neighbours
-
-    def swapClusters(self, c1, c2):
-        self.up_to_date = False
-        c1_start, c1_end = self.findCluster(c1)
-        c2_start, c2_end = self.findCluster(c2)
-
-        while c1_start < c1_end and c2_start < c2_end:
-            aux = self.destinations[c1_start]
-            self.destinations[c1_start] = self.destinations[c2_start]
-            self.destinations[c2_start] = aux
-            c1_start += 1
-            c2_start += 1
-
-        while c1_start < c1_end:
-            self.destinations.insert(c2_start, self.destinations[c1_start])
-            if c1_start > c2_start :
-                c1_start += 1
-                c2_start += 1
-            else :
-                c1_end -= 1
-
-            del self.destinations[c1_start]
-
-        while c2_start < c2_end:
-            self.destinations.insert(c1_start, self.destinations[c2_start])
-            if c2_start > c1_start :
-                c2_start += 1
-                c1_start += 1
-            else :
-                c2_end -= 1
-
-            del self.destinations[c2_start]
-
-        self.update()
-
-
-    def findCluster(self, cluster):
-        start = None
-        end =   None
-        bottomSearch = random.randint(0,1)
-        if bottomSearch :
-            for i in range(0, len(self.destinations)):
-                if self.destinations[i].label == cluster :
-                    start = i
-                    end = i
-                    break
-            i = start
-            # print i, len(self.destinations), cluster
-            while i < len(self.destinations) and self.destinations[i].label == cluster:
-                end += 1
-                i   += 1
-        else:
-            for i in range(len(self.destinations)-1, -1, -1):
-                if self.destinations[i].label == cluster:
-                    end = i+1
-                    start = i
-                    break
-                i = start
-                while i >= 0 and self.destinations[i].label == cluster:
-                    start -= 1
-                    i -= 1
-
-        return start, end
-
-    # !!! does not trigger update automatically
-    def insertElements(self, index, elements):
-        self.up_to_date = False
-
-        removed = 0
-        for d in self.destinations :
-            for e in elements :
-                if e.number == d.number :
-                    self.destinations.remove(d)
-                    removed += 1
-                    break
-            if removed == len(elements) :
-                break
-
-        for i in range(0, len(elements)):
-            self.destinations.insert( index+i, elements[i] )
-
-        self.update()
-
-    def linkDestinatios(self, d1, d2):
-        self.up_to_date = False
-
-        d1_index = 0
-        d2_index = 0
-
-
-        for i in range(0, len(self.destinations)):
-            # print i, len(self.destinations)
-            if d2.number == self.destinations[i].number :
-                d2_index = i
-            if d1.number == self.destinations[i].number :
-                d1_index = i
-
-        del self.destinations[d2_index]
-        self.destinations.insert(d1_index+1, d2)
-
-        self.update()
-
-    def computeFitness(self):
-        capacity        = self.truck_capacity - self.destinations[0].demand
-        self.fitness    = dist(self.deposit, self.destinations[0])
-
-        for i in range(0, len(self.destinations)-1):
-            nextDest = self.destinations[i+1]
-            previousDest = self.destinations[i]
-
-            if nextDest.demand > capacity:
-                # go to deposit first and then to next destination
-                self.fitness += dist(previousDest, self.deposit)
-
-                # reset capacity
-                capacity = self.truck_capacity
-
-                # update preious destination
-                previousDest = self.deposit
-
-            # update capacity
-            capacity -= nextDest.demand
-
-            # travel to next destination
-            self.fitness += dist(previousDest, nextDest)
-
-        # go back to deposit
-        self.fitness += dist(self.destinations[-1], self.deposit)
-
-    def filePrint(self) :
-        f = open('best-solution.txt', 'w')
-        f.write("login pp13003 68443\n")
-        f.write("name Paul Pintilie\n")
-        f.write("algorithm Genetic Algorithm with specialized crossover and mutation\n")
-        f.write("cost "+ str(self.fitness) + "\n")
-        string = "1->" +str( self.destinations[0].number + 1 )
-        capacity = self.truck_capacity - self.destinations[0].demand
-        for i in range(0, len(self.destinations)-1):
-            nextDest = self.destinations[i+1]
-            previousDest = self.destinations[i]
-
-            if nextDest.demand > capacity:
-                # go to deposit first and then to next destination
-                string += "->1\n1"
-                # reset capacity
-                capacity = self.truck_capacity
-
-                # update preious destination
-                previousDest = self.deposit
-
-            # update capacity
-            capacity -= nextDest.demand
-
-            # travel to next destination
-            string += "->" + str(nextDest.number+1)
-
-        # go back to deposit
-        # self.fitness += dist(self.destinations[-1], self.deposit)
-        string += "->" + str(self.deposit.number+1) + "\n"
-        f.write(string)
-
-class Truck:
-    def __init__(self, capacity, deposit):
-        self.capacity = capacity
-        self.traveled = 0
-        self.route = [deposit, deposit]
-
-    def addDestination(self, destination):
-        self.route.insert(len(self.route)-1, destination)
-
-        self.traveled += dist(self.route[-1], self.route[-2])
-        self.traveled += dist(self.route[-2], self.route[-3])
-        self.traveled -= dist(self.route[-1], self.route[-3])
-
-        self.capacity -= destination.demand
-
-    def removeNode(self):
-        index = random.randint(1, len(self.route)-2)
-        node = self.route[index]
-        self.route.remove(self.route[index])
-
-        self.capacity += node.demand
-
-        self.traveled -= dist(self.route[-1], node)
-        self.traveled -= dist(self.route[-2], node)
-        self.traveled += dist(self.route[-1], self.route[-2])
-
-        return node
-
-    def addNode(self, index, node):
-        self.route.insert(index, node)
-
-        self.traveled += dist(node, self.route[index+1])
-        self.traveled += dist(node, self.route[index-1])
-        self.traveled -= dist(self.route[index+1], self.route[index-1])
-
-        self.capacity -= node.demand
-
-    def changeDestination(self, index, newNode):
-        # resotre capacity spent on previous destination
-        old_capacity = self.route[index].demand
-        self.capacity += old_capacity
-
-        old_distance        = dist(self.route[index], self.route[index+1]) + dist(self.route[index], self.route[index-1])
-        self.route[index]   = newNode
-        self.capacity -= newNode.demand
-        new_distance        = dist(self.route[index], self.route[index+1]) + dist(self.route[index], self.route[index-1])
-
-        self.traveled += new_distance - old_distance
-
-def mergeSort(solutions):
-    if len(solutions) > 1 :
-        mid         = len(solutions)//2
-        lefthalf    = solutions[:mid]
-        righthalf   = solutions[mid:]
-        mergeSort(lefthalf)
-        mergeSort(righthalf)
-
-        i = 0
-        j = 0
-        k = 0
-        while i<len(lefthalf) and j < len(righthalf):
-            if(lefthalf[i].fitness < righthalf[j].fitness ):
-                solutions[k] = lefthalf[i]
-                i+=1
-            else :
-                solutions[k] = righthalf[j]
-                j+=1
-            k+=1
-
-        while i < len(lefthalf):
-            solutions[k] = lefthalf[i]
-            i+=1
-            k+=1
-
-        while j < len(righthalf):
-            solutions[k] = righthalf[j]
-            j+=1
-            k+=1
-
-def dist(location1, location2):
-    return math.sqrt( pow(location1.position.x - location2.position.x, 2) + pow(location1.position.y - location2.position.y, 2) )
+    # solutions = newSolutions
+    return  newSolutions
 
 def get_labels(deposits):
     coords = map(lambda dep: [float(dep.position.x), float(dep.position.y)] , deposits)
@@ -506,7 +196,6 @@ def createTableRow(clusters, index, matrix):
 
     return order
 
-
 def get_clusters_matrix(destinations, labels):
     clusters  = get_clusters(destinations, labels)
     matrix  = [ ]
@@ -530,7 +219,6 @@ def generateMultipleSolutions(deposits, capacity, nr_solutions, labels=None, clu
 
     # start with no solution
     solutions   = []
-
 
     # get labels of clusters for each deposit
     if labels is None :
@@ -590,7 +278,7 @@ def generateRandomSolution(deposits, capacity, solution, sol_index, depo_labels 
                 failed.append(deposits[index])
 
             deposits.remove( deposits[index] )
-
+        extra = 0
         while len(failed) > 0 :
             attempt = False
             for i in range(1, len(clustersMatrix[failed[0].label])):
@@ -600,10 +288,13 @@ def generateRandomSolution(deposits, capacity, solution, sol_index, depo_labels 
                 break
 
             if not attempt :
+                extra +=1
+                print extra
                 trucks.append(Truck(capacity, startDeposit))
                 trucks[-1].addDestination(failed[0])
                 failed.remove(failed[0])
 
+        # print extra, len(failed), len(trucks)
     while trucks :
         index = random.randint(0, len(trucks)-1)
         destinations.extend(trucks[index].route[1:-1])
@@ -654,23 +345,117 @@ def printBestSolution(solutions, history):
 
     best[0].filePrint()
 
-def plotPoints(sol):
-
-    xpoints = [str(dest.position.x) for dest in sol.trucks[0].route]
-    ypoints = [str(dest.position.y) for dest in sol.trucks[0].route]
-
-    print xpoints[0]
-    plt.scatter(xpoints, ypoints)
-    plt.show()
-
 def regenerate(solutions, deposits, capacity, labels, clusterMatrix):
     mergeSort(solutions)
-
+    print "REGENERATED"
     new_solutions, labels, clusterMatrix = generateMultipleSolutions(deposits, capacity, int(len(solutions)*REPLACE/100), labels, clusterMatrix)
-    print "regenerated solutions:", len(new_solutions)
+    # print "regenerated solutions:", len(new_solutions)
     for i in range(0, len(new_solutions)):
         solutions[-i-1] = new_solutions[i]
     # printBestSolution(new_solutions)
+
+def getParents(solutions):
+    mergeSort(solutions)
+    size = len(solutions)
+    parentsRatio = 0.4
+    parents = []
+    if size == 1 :
+        return []
+
+    while len(solutions) > (1 - parentsRatio)*size :
+        index = random.randint(0, int((1-parentsRatio)*size)-1)
+        p = solutions[index]
+        parents.append(p)
+        del solutions[index]
+    return parents
+
+def getCrossRange(s):
+    pos1 = random.randint(0, int(len(s.destinations)-len(s.destinations)/5-1))
+    length = random.randint(0, int(len(s.destinations)/5))
+    pos2 = pos1 + length
+    if pos1 > pos2 :
+        return pos2, pos1
+    return pos1, pos2
+
+def simpleMutation(s):
+    if random.random() < MUTATION_RATE :
+        for _ in range(NR_MUTATIONS):
+            pos1 = random.randint(0, len(s.destinations)-1)
+            pos2 = random.randint(0, len(s.destinations)-1)
+            s.swapNodes(pos1, pos2)
+
+def createOffspring(s1, s2, pos1, pos2):
+
+    d1 = s1.destinations
+    d2 = s2.destinations
+
+    hashDest = [False]*len(d2)
+    newDest = [None] * len(d2)
+
+    for i in range(pos1, pos2):
+        newDest[i] = d1[i]
+        hashDest[d1[i].number-1] = True
+
+
+    index = 0
+    i = 0
+    while index < len(newDest) :
+        while i < len(d2) and hashDest[d2[i].number-1] :
+            i += 1
+
+        while index < len(newDest) and not newDest[index] is None :
+            index+=1
+
+        if i >= len(d2) or index >= len(newDest):
+            break
+
+        if(index < len(newDest) and i<len(d2)):
+            newDest[index] = d2[i]
+        index += 1
+        i += 1
+
+    child = Permutation(s2.deposit, newDest, s2.truck_capacity)
+
+    return child
+
+
+def orderedCrossOver(s1, s2):
+    pos1, pos2 = getCrossRange(s1)
+    kid1 = createOffspring(s1, s2, pos1, pos2)
+    kid2 = createOffspring(s2, s1, pos1, pos2)
+    return kid1, kid2
+
+def addOffspring(kid, solutions):
+    worst = solutions[0].fitness
+    idx = 0
+    for i in range(0, len(solutions)):
+        if solutions[i].fitness > worst :
+            worst = solutions[i].fitness
+            idx = i
+        if kid.fitness == solutions[i].fitness:
+            return solutions
+
+    if solutions[idx].fitness > kid.fitness:
+        solutions[idx] = kid
+    return solutions
+
+def crossParents(solutions, clusterMatrix):
+    for i in range(0, len(solutions)):
+        parent1 = solutions[random.randint(0, len(solutions)-1)]
+        parent2 = solutions[random.randint(0, len(solutions)-1)]
+
+        # kid1 = solutions[0]
+        # kid2 = solutions[1]
+        kid1, kid2 = orderedCrossOver(parent1, parent2)
+        simpleMutation(kid1)
+        simpleMutation(kid2)
+        # mutate(kid1, clusterMatrix)
+        # mutate(kid2, clusterMatrix)
+        solutions = addOffspring(kid1, solutions)
+        solutions = addOffspring(kid2, solutions)
+
+def newGeneration(solutions, clusterMatrix):
+    crossParents(solutions, clusterMatrix)
 
 def findPath(deposits, capacity):
     global ITERATIONS
@@ -679,19 +464,16 @@ def findPath(deposits, capacity):
     # generate start population
     solutions, labels, clusterMatrix = generateMultipleSolutions(deposits, capacity, NR_SOLUTIONS)
 
-    # test(solutions)
     for i in range(0, ITERATIONS):
-        crossOver(solutions, clusterMatrix)
-
-        if i%100 == 0  :
+        newGeneration(solutions, clusterMatrix)
+        if i%100 == 0 :
             regenerate(solutions, deposits, capacity, labels, clusterMatrix)
-            mutations(solutions)
         if i%10 == 0 :
             printBestSolution(solutions, history)
 
-    # solutions[0].swapClusters(1,2)
     plt.plot(range(len(history)), history)
     plt.show()
+
     return solutions
 
 if __name__ == "__main__":
@@ -724,4 +506,4 @@ if __name__ == "__main__":
 
     print "Read " + str(len(deposits)) +  " coordinates"
 
-    path = findPath(deposits, capacity)
+    sol1 = findPath(deposits, capacity)
