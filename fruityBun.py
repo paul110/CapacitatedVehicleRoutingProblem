@@ -21,11 +21,11 @@ from helperFunctions import *
 TOP_SOLUTIONS   = 3
 MUTATION_RATIO  = 201
 
-NR_SOLUTIONS    = 50
+NR_SOLUTIONS    = 100
 ITERATIONS      = 1000
 
 INCREASE_SOLUTIONS   = 100
-ITERATIONS_GENETIC  = 4000
+INCREASE_ITERATIONS  = 3000
 
 TRUCKS          = 25
 PROCESSORS      = 4
@@ -500,6 +500,7 @@ def newGeneration(solutions, clusterMatrix):
     solutions = crossParents(solutions, clusterMatrix)
 
 def findPath(deposits, capacity):
+    global ITERATIONS
     history = []
 
     # generate start population
@@ -515,6 +516,7 @@ def findPath(deposits, capacity):
     moreSolutions, labels, clusterMatrix = generateMultipleSolutions(deposits, capacity, INCREASE_SOLUTIONS, labels, clusterMatrix)
     solutions.extend(moreSolutions)
 
+    ITERATIONS += INCREASE_ITERATIONS
     for i in range(0, ITERATIONS):
         if i%2 :
             newGeneration(solutions, clusterMatrix)
