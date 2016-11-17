@@ -104,7 +104,8 @@ class Permutation:
         start = None
         end =   None
         bottomSearch = random.randint(0,1)
-        minimum = random.randint(1, 3)
+        # minimum = random.randint(1, 3)
+        minimum = 1
         if bottomSearch :
             start = 0
             end = 1
