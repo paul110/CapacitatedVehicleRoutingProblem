@@ -62,7 +62,7 @@ class Permutation:
             i+=1
         if len(neighbours) < 1:
             print "empty"
-            neighbours.append(random.randint(0.23))
+            neighbours.append(random.randint(0,23))
         return neighbours
 
     def swapClusters(self, c1, c2):
