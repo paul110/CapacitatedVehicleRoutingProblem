@@ -627,9 +627,9 @@ def findPath(deposits, capacity):
         # gen_combo.addPopulation(gen[i].solutions)
         gen_combo.addPopulation(solutions[:10])
     #
-    gen_combo.hillclimber(2000)
-    # gen_combo.genetics(3000)
+    gen_combo.hillclimber(3000)
     gen_combo.genetics(10000)
+    # gen_combo.genetics(3000)
 
     # checkRoutes(gen_combo.solutions[0])
 
