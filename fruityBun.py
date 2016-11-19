@@ -18,7 +18,7 @@ from truck import Truck
 
 from helperFunctions import *
 
-TOP_SOLUTIONS   = 3
+top_solutions   = 3
 MUTATION_RATIO  = 201
 
 NR_SOLUTIONS    = 25
@@ -383,6 +383,7 @@ def addOffspring(kid, solutions, check):
             return solutions
 
     if solutions[idx].fitness > kid.fitness or check == 0:
+
         solutions[idx] = kid
 
     return solutions
@@ -423,8 +424,49 @@ def crossParentsPairs(solutions, clusterMatrix):
         return solutions
 
 
+
+def pickParent(solutions):
+    sumSol = sum(x.fitness for x in solutions)
+    if len(solutions) == 1:
+        return 0
+
+    probabilities = map(lambda x: (1 - x.fitness/sumSol)/(len(solutions) - 1), solutions)
+
+    cumsums = np.cumsum(probabilities)
+
+    something = random.random()
+
+    for index, value in enumerate(cumsums):
+        if index == len(cumsums)-1:
+            return index
+        if value < something and something < cumsums[index+1]:
+            return index
+
+
+def crossParentsNew(solutions, clusterMatrix):
+
+    sol_copy = solutions[:]
+    while len(solutions) > 2:
+        idx = pickParent(solutions)
+        parent1 = solutions[idx]
+        del solutions[idx]
+
+        idx2 = pickParent(solutions)
+        parent2 = solutions[idx2]
+        del solutions[idx2]
+
+        kid1, kid2 = orderedCrossOver(parent1, parent2)
+        simpleMutation(kid1)
+        simpleMutation(kid2)
+        sol_copy = addOffspring(kid1, sol_copy, idx2%2)
+        sol_copy = addOffspring(kid2, sol_copy, idx%2)
+
+    return sol_copy
+
+
 def crossParents(solutions, clusterMatrix):
     sort = False
+
     if sort :
         mergeSort(solutions)
 
@@ -471,43 +513,22 @@ class Generation:
         for i in range(0, len(new_solutions)):
             self.solutions[-i-1] = new_solutions[i]
 
-
-    def printBestSolution(self):
+    def printBestSolution(self, top_solutions):
         global MUTATION_RATE
-        global TOP_SOLUTIONS
 
-        best = []
-        if len(self.solutions) < TOP_SOLUTIONS:
-            TOP_SOLUTIONS = len(self.solutions)
-
-        # update fitness
-        for sol in self.solutions:
-            sol.update()
-
-        for i in range(0, TOP_SOLUTIONS):
-            best.append(self.solutions[i])
+        best = self.solutions[:top_solutions]
+        avg = sum(x.fitness for x in self.solutions)/len(self.solutions)
 
         mergeSort(best)
 
-        avg = 0
-        for sol in self.solutions:
-            avg += sol.fitness
-        avg = avg / len(self.solutions)
-
-
-        for sol in self.solutions[TOP_SOLUTIONS:]:
-            for i in range(0, TOP_SOLUTIONS):
+        for sol in self.solutions[top_solutions:]:
+            for i in range(0, top_solutions):
                 if best[i].fitness > sol.fitness :
                     best.insert( i, sol )
                     break
-        # if abs(best[0].fitness - avg) < 10 :
-        #     MUTATION_RATE = 0.8
-        # else:
-        #     MUTATION_RATE = 0.4
 
         self.history.append(best[0].fitness)
-
-        top = map(lambda x: str(x.fitness), best[:TOP_SOLUTIONS])
+        top = map(lambda x: str(x.fitness), best[:top_solutions])
 
         CURSOR_UP_ONE = '\x1b[1A'
         ERASE_LINE = '\x1b[2K'
@@ -560,7 +581,7 @@ class Generation:
         return solutions
 
     def nextGeneration(self):
-        self.solutions = crossParents(self.solutions, self.clusterMatrix)
+        self.solutions = crossParentsNew(self.solutions, self.clusterMatrix)
 
     def hillclimber(self, iterations):
         self.iterations = iterations
@@ -568,7 +589,7 @@ class Generation:
         for i in range(0, self.iterations):
             crossOver(self.solutions, self.clusterMatrix)
             if i % self.printEvery == 0:
-                self.printBestSolution()
+                self.printBestSolution(3)
 
     def genetics(self, iterations):
         self.iterations = iterations
@@ -576,7 +597,7 @@ class Generation:
         for i in range(0, self.iterations):
             self.nextGeneration()
             if i % self.printEvery == 0:
-                self.printBestSolution()
+                self.printBestSolution(3)
 
     def both(self, iterations):
         self.iterations = iterations
@@ -588,26 +609,29 @@ class Generation:
             else:
                 crossOver(self.solutions, self.clusterMatrix)
             if i % self.printEvery == 0:
-                self.printBestSolution()
+                self.printBestSolution(3)
 
-def newGeneration(solutions, clusterMatrix):
-    # solutions = crossParentsPairs(solutions, clusterMatrix)
-    solutions = crossParents(solutions, clusterMatrix)
 
 def findPath(deposits, capacity):
-    global ITERATIONS
     history = []
     solutions = []
 
     gen = []
-    gen_combo = Generation(15, 10, deposits, capacity)
+    gen_combo = Generation(4, 10, deposits, capacity)
     for i in range(0, 4):
         gen.append(Generation(25, 10, deposits, capacity))
         gen[i].hillclimber(2000)
-        gen[i].genetics(2000)
-        gen_combo.addPopulation(gen[i].solutions)
-
+        gen[i].genetics(5000)
+        solutions = gen[i].solutions
+        mergeSort(solutions)
+        # gen_combo.addPopulation(gen[i].solutions)
+        gen_combo.addPopulation(solutions[:10])
+    #
+    gen_combo.hillclimber(2000)
+    # gen_combo.genetics(3000)
     gen_combo.genetics(10000)
+
+    # checkRoutes(gen_combo.solutions[0])
 
     plt.plot(range(len(gen_combo.history)), gen_combo.history)
     plt.show()
