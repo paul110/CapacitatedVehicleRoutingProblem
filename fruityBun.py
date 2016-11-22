@@ -327,7 +327,10 @@ def simpleMutation(s):
         for _ in range(NR_MUTATIONS):
             pos1 = random.randint(0, len(s.destinations)-1)
             pos2 = random.randint(0, len(s.destinations)-1)
-            s.swapNodes(pos1, pos2)
+            if random.randint(0,1):
+                s.invert(pos1, pos2)
+            else:
+                s.swapNodes(pos1, pos2)
 
 def createOffspring(s1, s2, pos1, pos2):
 
@@ -369,8 +372,6 @@ def orderedCrossOver(s1, s2):
     kid1 = createOffspring(s1, s2, pos1, pos2)
     kid2 = createOffspring(s2, s1, pos1, pos2)
     return kid1, kid2
-
-
 
 def addOffspring(kid, solutions, check):
     worst = solutions[0].fitness
@@ -423,8 +424,6 @@ def crossParentsPairs(solutions, clusterMatrix):
         solutions[to_replace[i]] = kids[i]
         return solutions
 
-
-
 def pickParent(solutions):
     sumSol = sum(x.fitness for x in solutions)
     if len(solutions) == 1:
@@ -458,7 +457,7 @@ def crossParentsNew(solutions, clusterMatrix):
         kid1, kid2 = orderedCrossOver(parent1, parent2)
         simpleMutation(kid1)
         simpleMutation(kid2)
-        sol_copy = addOffspring(kid1, sol_copy, idx2%2)
+        sol_copy = addOffspring(kid1, sol_copy, idx%2)
         sol_copy = addOffspring(kid2, sol_copy, idx%2)
 
     return sol_copy
@@ -488,6 +487,18 @@ def crossParents(solutions, clusterMatrix):
 
     return solutions
 
+def getBestNeighbour(current, deposits):
+    minDistance = dist(current, deposits[0])
+    best = deposits[0]
+
+    for d in deposits:
+        distance = dist(current, d)
+        if distance < minDistance:
+            best = d
+            minDistance = distance
+
+    return best
+
 class Generation:
     def __init__(self, pop_nr, iterations_nr, deposits, capacity):
         self.population_number = pop_nr
@@ -496,7 +507,7 @@ class Generation:
         self.capacity = capacity
         self.labels = None
         self.clusterMatrix = None
-        self.solutions = self.generateMultipleSolutions(self.population_number)
+        self.solutions = self.newMultipleSolutions(self.population_number)
         self.history = []
         self.printEvery = 100
 
@@ -542,6 +553,48 @@ class Generation:
         print "Progress[" + "#" *int(progress/length) + " "*int((100-progress)/length) + "]"
 
         best[0].filePrint()
+
+
+    def generateSolutionNeighbours(self):
+        sol = []
+        temp_deposits = self.deposits[:]
+        origin  = temp_deposits[0]
+        del temp_deposits[0]
+
+        # current = getBestNeighbour(origin, temp_deposits)
+        current = temp_deposits[random.randint(0, len(temp_deposits)-1)]
+        temp_deposits.remove(current)
+        sol.append(current)
+
+
+        while len(temp_deposits) > 0 :
+            current = getBestNeighbour(current, temp_deposits)
+            sol.append(current)
+            temp_deposits.remove(current)
+            # print current.demand
+
+        # print len(sol)
+        p = Permutation(origin, sol, self.capacity)
+        return p
+
+    def newMultipleSolutions(self, nr_solutions):
+        solutions   = []
+
+        # get labels of clusters for each deposit
+        if self.labels is None :
+            self.labels = get_labels(self.deposits)
+
+        if self.clusterMatrix is None :
+            self.clusterMatrix = get_clusters_matrix(self.deposits, self.labels)
+
+        while len(solutions) < nr_solutions :
+            s = self.generateSolutionNeighbours()
+            # print s.fitness
+            solutions.append(s)
+
+        # print len(solutions)
+        return solutions
+
 
     def generateMultipleSolutions(self, nr_solutions):
         global PROCESSORS
@@ -613,25 +666,33 @@ class Generation:
 
 
 def findPath(deposits, capacity):
+    global MUTATION_RATE
     history = []
     solutions = []
 
+
     gen = []
-    gen_combo = Generation(4, 10, deposits, capacity)
+    gen_combo = Generation(10, 10, deposits, capacity)
+    # gen_combo.printBestSolution(1)
     for i in range(0, 4):
-        gen.append(Generation(25, 10, deposits, capacity))
+        gen.append(Generation(10, 10, deposits, capacity))
+        MUTATION_RATE = 0.4
         gen[i].hillclimber(2000)
-        gen[i].genetics(5000)
-        solutions = gen[i].solutions
+        gen[i].both(1000)
+        gen[i].genetics(1000)
+        MUTATION_RATE = 0.8
+        gen[i].genetics(1000)
+        solutions =  gen[i].solutions
         mergeSort(solutions)
-        # gen_combo.addPopulation(gen[i].solutions)
         gen_combo.addPopulation(solutions[:10])
-    #
-    gen_combo.hillclimber(3000)
+    # #
+    MUTATION_RATE = 0.2
+    # print len(gen_combo.solutions)
+    gen_combo.both(5000)
+    MUTATION_RATE = 0.8
     gen_combo.genetics(10000)
     # gen_combo.genetics(3000)
 
-    # checkRoutes(gen_combo.solutions[0])
 
     plt.plot(range(len(gen_combo.history)), gen_combo.history)
     plt.show()

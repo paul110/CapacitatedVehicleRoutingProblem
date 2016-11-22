@@ -7,6 +7,7 @@ class Permutation:
         self.truck_capacity = capacity
         self.fitness        = 0
         self.up_to_date     = False
+        self.trucks = []
 
         self.update()
 
@@ -184,6 +185,18 @@ class Permutation:
 
         self.update()
 
+    def invert(self, idx1, idx2):
+        id1 = min(idx1, idx2)
+        id2 = max(idx1, idx2)
+
+        while id1 < id2 :
+            aux = self.destinations[id1]
+            self.destinations[id1] = self.destinations[id2]
+            self.destinations[id2] = aux
+            id1 += 1
+            id2 -= 1
+        self.update()
+
     def computeFitness(self):
         capacity        = self.truck_capacity - self.destinations[0].demand
         self.fitness    = dist(self.deposit, self.destinations[0])
@@ -213,11 +226,11 @@ class Permutation:
 
     def filePrint(self) :
         f = open('best-solution.txt', 'w')
-        f.write("login pp13003 68443\n")
-        f.write("name Paul Pintilie\n")
-        f.write("algorithm Genetic Algorithm with specialized crossover and mutation\n")
-        f.write("cost "+ str(self.fitness) + "\n")
-        string = "1->" +str( self.destinations[0].number + 1 )
+        string = "login pp13003 68443\n"
+        string += "name Paul Pintilie\n"
+        string += "algorithm Genetic Algorithm with specialized crossover and mutation\n"
+        string += "cost "+ str(self.fitness) + "\n"
+        string += "1->" +str( self.destinations[0].number + 1 )
         capacity = self.truck_capacity - self.destinations[0].demand
         for i in range(0, len(self.destinations)-1):
             nextDest = self.destinations[i+1]
@@ -241,6 +254,7 @@ class Permutation:
         # go back to deposit
         # self.fitness += dist(self.destinations[-1], self.deposit)
         string += "->" + str(self.deposit.number+1) + "\n"
+
         f.write(string)
 
     def plotDestinations(self):
