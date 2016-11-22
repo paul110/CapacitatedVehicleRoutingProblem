@@ -665,29 +665,43 @@ class Generation:
                 self.printBestSolution(3)
 
 
+def parallelRun(gen, pid):
+    g = Generation(10, 10, deposits, capacity)
+    # print g.solutions[0].fitness
+    MUTATION_RATE = 0.4
+    g.hillclimber(2000)
+    g.both(1000)
+    g.genetics(2000)
+    MUTATION_RATE = 0.8
+    g.genetics(5000)
+    gen[pid] = g
+
 def findPath(deposits, capacity):
     global MUTATION_RATE
     history = []
     solutions = []
-
-
     gen = []
+    procs = [None]*4
+
+
+    manager = Manager()
+    generations = manager.dict()
+
+    for i in range(0,4):
+        procs[i] = Process(target = parallelRun, args= (generations, i) )
+        procs[i].start()
+
+    for i in range(0,4):
+        procs[i].join()
+        gen.append(generations[i])
+
     gen_combo = Generation(10, 10, deposits, capacity)
-    # gen_combo.printBestSolution(1)
     for i in range(0, 4):
-        gen.append(Generation(10, 10, deposits, capacity))
-        MUTATION_RATE = 0.4
-        gen[i].hillclimber(2000)
-        gen[i].both(1000)
-        gen[i].genetics(1000)
-        MUTATION_RATE = 0.8
-        gen[i].genetics(1000)
         solutions =  gen[i].solutions
         mergeSort(solutions)
         gen_combo.addPopulation(solutions[:10])
-    # #
+
     MUTATION_RATE = 0.2
-    # print len(gen_combo.solutions)
     gen_combo.both(5000)
     MUTATION_RATE = 0.8
     gen_combo.genetics(10000)
