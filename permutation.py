@@ -24,13 +24,8 @@ class Permutation:
         self.update()
 
 
-    def checkRoutes(self):
-        for i in range(400, 500):
-            self.truck_capacity = i
-            self.update()
-            print self.fitness
-
     def findCrossOverPoint(self):
+
         attempts = 1
         bestDist = None
         while attempts > 0:

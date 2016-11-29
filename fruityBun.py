@@ -18,22 +18,11 @@ from truck import Truck
 
 from helperFunctions import *
 
-top_solutions   = 3
-MUTATION_RATIO  = 201
-
-NR_SOLUTIONS    = 25
-ITERATIONS      = 1000
-
-INCREASE_SOLUTIONS   = 0
-INCREASE_ITERATIONS  = 9000
-
 TRUCKS          = 25
 PROCESSORS      = 4
 CHANGES         = 2
-THREADS         = 100
-REPLACE         = 20
 NR_MUTATIONS    = 1
-MUTATION_RATE   = 0.8
+MUTATION_RATE   = 0.4
 
 
 CrossPair   = namedtuple("CrossPair", "sol1, sol2")
@@ -43,55 +32,24 @@ def combineSolutions(s1, s2):
     scopy1 = Permutation(s1.deposit, s1.destinations[:], s1.truck_capacity)
     scopy2 = Permutation(s2.deposit, s2.destinations[:], s2.truck_capacity)
 
-    # for _ in range(CHANGES):
-    s1_client_1, s1_client_2  = s1.findCrossOverPoint()
-    scopy2.linkDestinatios(s1_client_1, s1_client_2)
+    for _ in range(3):
+        s1_client_1, s1_client_2  = s1.findCrossOverPoint()
+        scopy2.linkDestinatios(s1_client_1, s1_client_2)
 
-    # for _ in range(CHANGES):
-    s2_client_1, s2_client_2  = s2.findCrossOverPoint()
-    scopy1.linkDestinatios(s2_client_1, s2_client_2)
+        s2_client_1, s2_client_2  = s2.findCrossOverPoint()
+        scopy1.linkDestinatios(s2_client_1, s2_client_2)
 
     return scopy1,scopy2
 
-def combineSolutions2(s1, s2, clusterMatrix):
+def clusterMutation(s1, clusterMatrix):
     c1 = random.randint(0, 23)
     c2 = random.randint(0, 23)
-    # print c1, c2
+
     scopy1 = Permutation(s1.deposit, s1.destinations[:], s1.truck_capacity)
-    scopy2 = Permutation(s2.deposit, s2.destinations[:], s2.truck_capacity)
+    c1_n = scopy1.getClusterNeighbours(c1)
+    c2 = clusterMatrix[c1_n[-1]][random.randint(1,3)]
 
-    # c1_n = scopy1.getClusterNeighbours(c1)
-    # c2 = clusterMatrix[c1_n[-1]][random.randint(1,3)]
-    # c2 = random.randint(0,23)
     scopy1.swapClusters(c1, c2)
-
-    # c1_n = scopy2.getClusterNeighbours(c1)
-    # c2 = clusterMatrix[c1_n[-1]][random.randint(1,3)]
-    scopy2.swapClusters(c1, c2)
-
-    return scopy1, scopy2
-
-# uniform ordered permutation
-def UOX(s1, s2):
-    length = len(s1.destinations)
-    bits = ('{0:0'+str(length) + 'b}').format(random.getrandbits(length))
-
-    scopy1 =  Permutation(s1.deposit, s1.destinations[:], s1.truck_capacity)
-    start_index = None
-    elements    = []
-    # while string not
-    for i in range(0, len(bits)):
-        bit = int(bits[i])
-
-        if bit :
-            if start_index is None :
-                start_index = i
-
-            elements.append(s2.destinations[i])
-        else :
-            scopy1.insertElements(start_index, elements)
-            start_index = None
-            elements = []
     return scopy1
 
 def chooseSolution(sol1, sol2):
@@ -105,42 +63,31 @@ def crossOver(solutions, clusterMatrix):
     pairs   = []
     results = []
     while(len(solutions) > 1):
-        first = solutions[random.randint(0, len(solutions)-1)]
+        idx = pickParent(solutions)
+        first = solutions[idx]
         solutions.remove(first)
 
-        second = solutions[random.randint(0, len(solutions)-1)]
+        idx2 = pickParent(solutions)
+        second = solutions[idx2]
         solutions.remove(second)
 
         pairs.append(CrossPair(first, second))
 
     for i in range(0, len(pairs)):
-        first, second = combineSolutions2(pairs[i].sol1, pairs[i].sol2, clusterMatrix)
+        # if random.random() < MUTATION_RATE:
+        first = clusterMutation(pairs[i].sol1, clusterMatrix)
         first = chooseSolution(first, pairs[i].sol1)
+
+        # if random.random() < MUTATION_RATE:
+        second = clusterMutation(pairs[i].sol2, clusterMatrix)
         second = chooseSolution(second, pairs[i].sol2)
-        for _ in range(CHANGES):
+
+
+        for _ in range(1):
             first1, second1 = combineSolutions(first, second)
             first = chooseSolution(first, first1)
             second = chooseSolution(second, second1)
         solutions.extend([first, second])
-
-def mutate(s1, clusterMatrix):
-    if random.random() < MUTATION_RATE :
-        # scopy1 = Permutation(s1.deposit, s1.destinations[:], s1.truck_capacity)
-        for _ in range(NR_MUTATIONS):
-            # scopy1 = chooseSolution(scopy1, s1)
-            c1 = random.randint(0, 23)
-            c1_n = s1.getClusterNeighbours(c1)
-            # c2 = clusterMatrix[c1_n[-1]][1]
-            c2 = clusterMatrix[c1_n[random.randint(0, len(c1_n)-1)]][random.randint(1, 10)]
-            # c2 = random.randint(1, 23)
-            s1.swapClusters(c1, c2)
-
-    # return chooseSolution(s1, scopy1)
-
-def mutations(solutions, clusterMatrix) :
-    for _ in range(len(solutions)):
-        index = random.randint(0, len(solutions)-1)
-        mutate(solutions[index],clusterMatrix)
 
 def get_labels(deposits):
     coords = map(lambda dep: [float(dep.position.x), float(dep.position.y)] , deposits)
@@ -297,23 +244,6 @@ def generateRandomSolution(deposits, capacity, solution, sol_index, depo_labels 
     solution[sol_index] = Permutation(startDeposit, destinations, capacity)
 
 
-
-
-def getParents(solutions):
-    mergeSort(solutions)
-    size = len(solutions)
-    parentsRatio = 0.4
-    parents = []
-    if size == 1 :
-        return []
-
-    while len(solutions) > (1 - parentsRatio)*size :
-        index = random.randint(0, int((1-parentsRatio)*size)-1)
-        p = solutions[index]
-        parents.append(p)
-        del solutions[index]
-    return parents
-
 def getCrossRange(s):
     pos1 = random.randint(0, int(len(s.destinations)-len(s.destinations)/10-1))
     length = random.randint(0, int(len(s.destinations)/10))
@@ -332,6 +262,7 @@ def simpleMutation(s):
             else:
                 s.swapNodes(pos1, pos2)
 
+# used in orderd crossover
 def createOffspring(s1, s2, pos1, pos2):
 
     d1 = s1.destinations
@@ -366,7 +297,6 @@ def createOffspring(s1, s2, pos1, pos2):
 
     return child
 
-
 def orderedCrossOver(s1, s2):
     pos1, pos2 = getCrossRange(s1)
     kid1 = createOffspring(s1, s2, pos1, pos2)
@@ -389,41 +319,6 @@ def addOffspring(kid, solutions, check):
 
     return solutions
 
-def crossParentsPairs(solutions, clusterMatrix):
-    pair = []
-    to_replace = []
-    kids = []
-    for i in range(0, len(solutions)/2):
-        idx1 = random.randint(0, len(solutions)-1)
-        idx2 = random.randint(0, len(solutions)-1)
-
-        if solutions[idx1].fitness > solutions[idx2].fitness:
-            pair.append(solutions[idx2])
-            to_replace.append(idx1)
-        else:
-            pair.append(solutions[idx1])
-            to_replace.append(idx2)
-
-        if len(pair) == 2:
-            kid1, kid2 = orderedCrossOver(pair[0], pair[1])
-            simpleMutation(kid1)
-            simpleMutation(kid2)
-            # mutate(kid1, clusterMatrix)
-            # mutate(kid2, clusterMatrix)
-            kids.append(kid1)
-            kids.append(kid2)
-            # solutions[to_replace[-1]] = kid1
-            # solutions[to_replace[-2]] = kid2
-            # solutions = addOffspring(kid1, solutions, 0)
-            # solutions = addOffspring(kid2, solutions, 0)
-            pair = []
-            # to_replace = []
-
-    for i in range(0, len(kids)):
-        # if solutions[to_replace[i]].fitness > kids[i].fitness:
-        solutions[to_replace[i]] = kids[i]
-        return solutions
-
 def pickParent(solutions):
     sumSol = sum(x.fitness for x in solutions)
     if len(solutions) == 1:
@@ -441,9 +336,7 @@ def pickParent(solutions):
         if value < something and something < cumsums[index+1]:
             return index
 
-
-def crossParentsNew(solutions, clusterMatrix):
-
+def crossParents(solutions, clusterMatrix):
     sol_copy = solutions[:]
     while len(solutions) > 2:
         idx = pickParent(solutions)
@@ -458,34 +351,9 @@ def crossParentsNew(solutions, clusterMatrix):
         simpleMutation(kid1)
         simpleMutation(kid2)
         sol_copy = addOffspring(kid1, sol_copy, idx%2)
-        sol_copy = addOffspring(kid2, sol_copy, idx%2)
+        sol_copy = addOffspring(kid2, sol_copy, idx2%2)
 
     return sol_copy
-
-
-def crossParents(solutions, clusterMatrix):
-    sort = False
-
-    if sort :
-        mergeSort(solutions)
-
-    for i in range(0, len(solutions)):
-        idx1 = random.randint(0, len(solutions)-1)
-        idx2 = random.randint(0, len(solutions)-1)
-        parent1 = solutions[idx1]
-        parent2 = solutions[idx2]
-
-        # kid1 = solutions[0]
-        # kid2 = solutions[1]
-        kid1, kid2 = orderedCrossOver(parent1, parent2)
-        simpleMutation(kid1)
-        simpleMutation(kid2)
-        # mutate(kid1, clusterMatrix)
-        # mutate(kid2, clusterMatrix)
-        solutions = addOffspring(kid1, solutions, idx2%2)
-        solutions = addOffspring(kid2, solutions, idx1%2)
-
-    return solutions
 
 def getBestNeighbour(current, deposits):
     minDistance = dist(current, deposits[0])
@@ -518,9 +386,7 @@ class Generation:
 
     def regenerate(self, percentage):
         mergeSort(self.solutions)
-        # print "REGENERATED"
         new_solutions = self.generateMultipleSolutions(int(len(self.solutions)*percentage/100))
-        # print "regenerated solutions:", len(new_solutions)
         for i in range(0, len(new_solutions)):
             self.solutions[-i-1] = new_solutions[i]
 
@@ -561,7 +427,6 @@ class Generation:
         origin  = temp_deposits[0]
         del temp_deposits[0]
 
-        # current = getBestNeighbour(origin, temp_deposits)
         current = temp_deposits[random.randint(0, len(temp_deposits)-1)]
         temp_deposits.remove(current)
         sol.append(current)
@@ -571,9 +436,6 @@ class Generation:
             current = getBestNeighbour(current, temp_deposits)
             sol.append(current)
             temp_deposits.remove(current)
-            # print current.demand
-
-        # print len(sol)
         p = Permutation(origin, sol, self.capacity)
         return p
 
@@ -589,10 +451,8 @@ class Generation:
 
         while len(solutions) < nr_solutions :
             s = self.generateSolutionNeighbours()
-            # print s.fitness
             solutions.append(s)
 
-        # print len(solutions)
         return solutions
 
 
@@ -634,7 +494,7 @@ class Generation:
         return solutions
 
     def nextGeneration(self):
-        self.solutions = crossParentsNew(self.solutions, self.clusterMatrix)
+        self.solutions = crossParents(self.solutions, self.clusterMatrix)
 
     def hillclimber(self, iterations):
         self.iterations = iterations
@@ -666,14 +526,15 @@ class Generation:
 
 
 def parallelRun(gen, pid):
-    g = Generation(10, 10, deposits, capacity)
-    # print g.solutions[0].fitness
+    g = Generation(10, 4, deposits, capacity)
     MUTATION_RATE = 0.4
-    g.hillclimber(2000)
+    g.hillclimber(3000)
     g.both(1000)
     g.genetics(2000)
     MUTATION_RATE = 0.8
     g.genetics(5000)
+
+
     gen[pid] = g
 
 def findPath(deposits, capacity):
@@ -681,30 +542,31 @@ def findPath(deposits, capacity):
     history = []
     solutions = []
     gen = []
-    procs = [None]*4
 
+    total_generations = 4
+    procs = [None]*total_generations
 
     manager = Manager()
     generations = manager.dict()
 
-    for i in range(0,4):
+    for i in range(0,total_generations):
         procs[i] = Process(target = parallelRun, args= (generations, i) )
         procs[i].start()
 
-    for i in range(0,4):
+    for i in range(0,total_generations):
         procs[i].join()
         gen.append(generations[i])
 
     gen_combo = Generation(10, 10, deposits, capacity)
-    for i in range(0, 4):
+    for i in range(0, total_generations):
         solutions =  gen[i].solutions
         mergeSort(solutions)
         gen_combo.addPopulation(solutions[:10])
 
-    MUTATION_RATE = 0.2
+    MUTATION_RATE = 0.4
     gen_combo.both(5000)
     MUTATION_RATE = 0.8
-    gen_combo.genetics(10000)
+    gen_combo.genetics(30000)
     # gen_combo.genetics(3000)
 
 
