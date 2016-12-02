@@ -248,7 +248,7 @@ class Permutation:
 
         # go back to deposit
         # self.fitness += dist(self.destinations[-1], self.deposit)
-        string += "->" + str(self.deposit.number+1) + "\n"
+        string += "->" + str(self.deposit.number+1)
         if filePrint:
             f.write(string)
             return

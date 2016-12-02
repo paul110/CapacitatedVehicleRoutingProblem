@@ -22,7 +22,7 @@ CHANGES         = 2
 NR_MUTATIONS    = 1
 MUTATION_RATE   = 0.4
 CLUSTERS        = 25
-PRINT           = True
+PRINT           = False
 
 
 CrossPair   = namedtuple("CrossPair", "sol1, sol2")
@@ -385,7 +385,7 @@ class Generation:
         self.printEvery = 100
         self.regenerated = True
         self.regenTries = 2000
-        self.timeout = time.time() + 60*28 #almost half an hour
+        self.timeout = time.time() + 60*1 #almost half an hour
 
 
     def addPopulation(self, array):
@@ -650,13 +650,13 @@ if __name__ == "__main__":
         tokens = map(int, line.split(" "))
         coords.append(Coordinates(tokens[1], tokens[2]))
         line = inputFile.readline().strip("\n")
-    print "Read " + str(len(coords)) +  " coordinates"
+    # print "Read " + str(len(coords)) +  " coordinates"
 
     # read demand section
     for x in range(1, len(coords)+1):
         line = map(int, inputFile.readline().strip("\n").split(" "))
         deposits.append(Deposit(coords[line[0]-1], line[1], x-1))
 
-    print "Read " + str(len(deposits)) +  " coordinates"
+    # print "Read " + str(len(deposits)) +  " coordinates"
 
     sol1 = findPath(deposits, capacity)
