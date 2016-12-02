@@ -1,2 +1,2 @@
 cvrp-runtime-in-minutes 30
-note-for-marker My code runs better while on the train, that is when best solution was achieved. Run appropriately if possible :D
+note-for-marker The code runs in parallel, so seeing as there are 8 cores on the lab machines I have made it run in 6, so ideally there is not much activity going on on the machine at the same time with my code. Also my code runs better while on the train, that is when best solution was achieved. Run appropriately if possible :D
