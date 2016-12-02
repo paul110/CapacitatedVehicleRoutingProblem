@@ -385,7 +385,7 @@ class Generation:
         self.printEvery = 100
         self.regenerated = True
         self.regenTries = 2000
-        self.timeout = time.time() + 60*1 #almost half an hour
+        self.timeout = time.time() + 60*28 #almost half an hour
 
 
     def addPopulation(self, array):
