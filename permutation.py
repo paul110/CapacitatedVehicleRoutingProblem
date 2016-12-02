@@ -64,7 +64,7 @@ class Permutation:
             curr = d.label
             i+=1
         if len(neighbours) < 1:
-            print "empty"
+            # print "empty"
             neighbours.append(random.randint(0,totalClusters))
         return neighbours
 
