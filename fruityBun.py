@@ -408,7 +408,7 @@ class Generation:
                 best = s
         best.printOut(False)
 
-        def prinTopSolutions(self, top_solutions):
+    def prinTopSolutions(self, top_solutions):
 
         global MUTATION_RATE
 
