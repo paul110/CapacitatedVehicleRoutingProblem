@@ -61,14 +61,14 @@ def main():
     clusters = kmeans(points, num_clusters, opt_cutoff)
 
     # Print our clusters
-    for i,c in enumerate(clusters):
-        for p in c.points:
-            print " Cluster: ", i, "\t Point :", p
+    # for i,c in enumerate(clusters):
+    #     for p in c.points:
+            # print " Cluster: ", i, "\t Point :", p
 
     # Display clusters using plotly for 2d data
     # This uses the 'open' command on a URL and may only work on OSX.
     if dimensions == 2 and PLOTLY_USERNAME:
-        print "Plotting points, launching browser ..."
+        # print "Plotting points, launching browser ..."
         plotClusters(clusters)
 
 class Point:

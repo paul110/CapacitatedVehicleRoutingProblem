@@ -234,7 +234,7 @@ def generateRandomSolution(deposits, capacity, solution, sol_index, depo_labels 
 
             if not attempt :
                 extra +=1
-                print extra
+                # print extra
                 trucks.append(Truck(capacity, startDeposit))
                 trucks[-1].addDestination(failed[0])
                 failed.remove(failed[0])
@@ -425,7 +425,7 @@ class Generation:
 
         self.history.append(best[0].fitness)
 
-        if not  PRINT:
+        if not PRINT:
             return
 
         top = map(lambda x: str(x.fitness), best[:top_solutions])

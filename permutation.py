@@ -259,6 +259,5 @@ class Permutation:
         xpoints = [str(dest.position.x) for dest in sol.trucks[0].route]
         ypoints = [str(dest.position.y) for dest in sol.trucks[0].route]
 
-        print xpoints[0]
         plt.scatter(xpoints, ypoints)
         plt.show()
