@@ -1,21 +1,19 @@
 import sys, random, math
 from collections import namedtuple
 import matplotlib.pyplot as plt
-import scipy.cluster.vq as clustering
 import numpy as np
-from scipy.cluster.vq import kmeans, vq
 import threading
-import gevent
-from gevent import Greenlet
+import time
 from multiprocessing import Process, Manager, Pool
 from threading import Thread
 
+
+from clustersLibr import kmeans, Point
 from cluster import Cluster
 from coordinates import Coordinates
 from deposit import Deposit
 from permutation import Permutation
 from truck import Truck
-
 from helperFunctions import *
 
 TRUCKS          = 25
@@ -23,11 +21,13 @@ PROCESSORS      = 4
 CHANGES         = 2
 NR_MUTATIONS    = 1
 MUTATION_RATE   = 0.4
+CLUSTERS        = 25
+PRINT           = True
 
 
 CrossPair   = namedtuple("CrossPair", "sol1, sol2")
 
-def combineSolutions(s1, s2):
+def linkCrossOver(s1, s2):
     global CHANGES
     scopy1 = Permutation(s1.deposit, s1.destinations[:], s1.truck_capacity)
     scopy2 = Permutation(s2.deposit, s2.destinations[:], s2.truck_capacity)
@@ -42,11 +42,11 @@ def combineSolutions(s1, s2):
     return scopy1,scopy2
 
 def clusterMutation(s1, clusterMatrix):
-    c1 = random.randint(0, 23)
-    c2 = random.randint(0, 23)
+    c1 = random.randint(0, CLUSTERS-1)
+    c2 = random.randint(0, CLUSTERS-1)
 
     scopy1 = Permutation(s1.deposit, s1.destinations[:], s1.truck_capacity)
-    c1_n = scopy1.getClusterNeighbours(c1)
+    c1_n = scopy1.getClusterNeighbours(c1, CLUSTERS)
     c2 = clusterMatrix[c1_n[-1]][random.randint(1,3)]
 
     scopy1.swapClusters(c1, c2)
@@ -59,44 +59,49 @@ def chooseSolution(sol1, sol2):
         return sol1
 
 # crossover between 2 solution
-def crossOver(solutions, clusterMatrix):
+# inputs: solutions = array of Permutations
+#         clusterMatrix = matrix of clusters and their closest other clusters
+# output: modifies solutions array
+def hillclimberCrossOver(solutions, clusterMatrix):
     pairs   = []
-    results = []
-    while(len(solutions) > 1):
+    while len(solutions) > 1 :
         idx = pickParent(solutions)
         first = solutions[idx]
-        solutions.remove(first)
+        del solutions[idx]
+        # solutions.remove(first)
 
         idx2 = pickParent(solutions)
         second = solutions[idx2]
-        solutions.remove(second)
-
+        del solutions[idx2]
+        # solutions.remove(second)
         pairs.append(CrossPair(first, second))
 
     for i in range(0, len(pairs)):
-        # if random.random() < MUTATION_RATE:
         first = clusterMutation(pairs[i].sol1, clusterMatrix)
         first = chooseSolution(first, pairs[i].sol1)
 
-        # if random.random() < MUTATION_RATE:
         second = clusterMutation(pairs[i].sol2, clusterMatrix)
         second = chooseSolution(second, pairs[i].sol2)
 
-
         for _ in range(1):
-            first1, second1 = combineSolutions(first, second)
+            first1, second1 = linkCrossOver(first, second)
             first = chooseSolution(first, first1)
             second = chooseSolution(second, second1)
         solutions.extend([first, second])
 
 def get_labels(deposits):
-    coords = map(lambda dep: [float(dep.position.x), float(dep.position.y)] , deposits)
+    coords = map(lambda dep: Point([float(dep.position.x), float(dep.position.y)], dep.number) , deposits)
     y = np.array(coords)
-    codebook, _ = kmeans(y, 25)  # three clusters
-    cluster_indeces, _ = vq(y, codebook)
 
     xpoints = [str(d.position.x) for d in deposits]
     ypoints = [str(d.position.y) for d in deposits]
+
+    cluster_indeces = [0]*len(deposits)
+    means =  kmeans(coords, CLUSTERS, 0.05)
+    for index, m in enumerate(means):
+        for p in m.points:
+            deposits[p.number].label = index
+            cluster_indeces[p.number] = index
 
     for i in range(0, len(cluster_indeces)):
         deposits[i].label = cluster_indeces[i]
@@ -141,7 +146,6 @@ def get_clusters_matrix(destinations, labels):
     clusters  = get_clusters(destinations, labels)
     matrix  = [ ]
     for i in range(0, len(clusters)):
-        # print clusters[i].centre
         matrix.append([])
         for j in range(0, len(clusters)):
             matrix[i].append(posDist(clusters[i].centre, clusters[j].centre))
@@ -375,9 +379,14 @@ class Generation:
         self.capacity = capacity
         self.labels = None
         self.clusterMatrix = None
+        self.baseProgress = 0
         self.solutions = self.newMultipleSolutions(self.population_number)
         self.history = []
         self.printEvery = 100
+        self.regenerated = True
+        self.regenTries = 2000
+        self.timeout = time.time() + 60*28 #almost half an hour
+
 
     def addPopulation(self, array):
         self.solutions.extend(array)
@@ -389,8 +398,18 @@ class Generation:
         new_solutions = self.generateMultipleSolutions(int(len(self.solutions)*percentage/100))
         for i in range(0, len(new_solutions)):
             self.solutions[-i-1] = new_solutions[i]
+        self.regenerated = True
+        self.regenTries = 2000
 
-    def printBestSolution(self, top_solutions):
+    def printBestSolution(self):
+        best = self.solutions[0]
+        for s in self.solutions:
+            if best.fitness > s.fitness :
+                best = s
+        best.printOut(False)
+
+    def prinTopSolutions(self, top_solutions):
+
         global MUTATION_RATE
 
         best = self.solutions[:top_solutions]
@@ -405,20 +424,23 @@ class Generation:
                     break
 
         self.history.append(best[0].fitness)
-        top = map(lambda x: str(x.fitness), best[:top_solutions])
 
+        if not  PRINT:
+            return
+
+        top = map(lambda x: str(x.fitness), best[:top_solutions])
         CURSOR_UP_ONE = '\x1b[1A'
         ERASE_LINE = '\x1b[2K'
-        if len(self.history) != 1:
+        if len(self.history[self.baseProgress:]) != 1:
             print CURSOR_UP_ONE + ERASE_LINE + CURSOR_UP_ONE
-        print "top self.solutions: " + " ".join(top) + "    avg: " + str(avg)
+        print "top self.solutions: " + " ".join(top) + "    avg: " + str(avg) + " regenTries:" + str(self.regenTries)
 
         length = 1.5
-        progress = (100* len(self.history)*100/self.iterations)
+        progress = (100* len(self.history[self.baseProgress:])*100/self.iterations)
 
         print "Progress[" + "#" *int(progress/length) + " "*int((100-progress)/length) + "]"
 
-        best[0].filePrint()
+        best[0].printOut(True)
 
 
     def generateSolutionNeighbours(self):
@@ -496,45 +518,78 @@ class Generation:
     def nextGeneration(self):
         self.solutions = crossParents(self.solutions, self.clusterMatrix)
 
+    def checkConvergence(self):
+        if self.regenerated:
+            self.regenTries -= 1
+        if self.regenTries == 0:
+            self.regenerated = False
+
+        if len(self.history) < 10 or self.regenerated:
+            return False
+
+        first = self.history[-10]
+        for h in self.history[-10:]:
+            if h != first :
+                return False
+        return True
+
     def hillclimber(self, iterations):
         self.iterations = iterations
-        self.history    = []
+        self.baseProgress = len(self.history)
         for i in range(0, self.iterations):
-            crossOver(self.solutions, self.clusterMatrix)
+            if time.time() > self.timeout:
+                return
+            if self.checkConvergence() :
+                # print "regenerate"
+                self.regenerate(80)
+            hillclimberCrossOver(self.solutions, self.clusterMatrix)
             if i % self.printEvery == 0:
-                self.printBestSolution(3)
+                self.prinTopSolutions(2)
+
+
 
     def genetics(self, iterations):
+
         self.iterations = iterations
-        self.history = []
+        self.baseProgress = len(self.history)
         for i in range(0, self.iterations):
+            if time.time() > self.timeout:
+                return
+            # if self.checkConvergence() :
+            #     # print "regenerate"
+            #     self.regenerate(80)
+
             self.nextGeneration()
             if i % self.printEvery == 0:
-                self.printBestSolution(3)
+                self.prinTopSolutions(2)
 
     def both(self, iterations):
+
         self.iterations = iterations
-        self.history = []
+        self.baseProgress = len(self.history)
 
         for i in range(0, self.iterations):
+            if time.time() > self.timeout:
+                return
+            if self.checkConvergence() :
+                # print "regenerate"
+                self.regenerate(80)
             if i%2 == 0 :
                 self.nextGeneration()
             else:
-                crossOver(self.solutions, self.clusterMatrix)
+                hillclimberCrossOver(self.solutions, self.clusterMatrix)
             if i % self.printEvery == 0:
-                self.printBestSolution(3)
+                self.prinTopSolutions(2)
 
 
 def parallelRun(gen, pid):
-    g = Generation(10, 4, deposits, capacity)
+    g = Generation(15, 4, deposits, capacity)
     MUTATION_RATE = 0.4
     g.hillclimber(3000)
     g.both(1000)
     g.genetics(2000)
     MUTATION_RATE = 0.8
     g.genetics(5000)
-
-
     gen[pid] = g
 
 def findPath(deposits, capacity):
@@ -543,7 +598,8 @@ def findPath(deposits, capacity):
     solutions = []
     gen = []
 
-    total_generations = 4
+    labels = get_labels(deposits)
+    total_generations = 5
     procs = [None]*total_generations
 
     manager = Manager()
@@ -557,21 +613,19 @@ def findPath(deposits, capacity):
         procs[i].join()
         gen.append(generations[i])
 
-    gen_combo = Generation(10, 10, deposits, capacity)
-    for i in range(0, total_generations):
+    for i in range(1, total_generations):
         solutions =  gen[i].solutions
         mergeSort(solutions)
-        gen_combo.addPopulation(solutions[:10])
+        gen[0].addPopulation(solutions[:10])
 
     MUTATION_RATE = 0.4
-    gen_combo.both(5000)
+    gen[0].both(5000)
     MUTATION_RATE = 0.8
-    gen_combo.genetics(30000)
-    # gen_combo.genetics(3000)
+    gen[0].genetics(30000)
 
-
-    plt.plot(range(len(gen_combo.history)), gen_combo.history)
-    plt.show()
+    # plt.plot(range(len(gen[0].history)), gen[0].history)
+    # plt.show()
+    gen[0].printBestSolution()
 
     return solutions
 

@@ -42,7 +42,7 @@ class Permutation:
 
         return client1, client2
 
-    def getClusterNeighbours(self, cluster):
+    def getClusterNeighbours(self, cluster, totalClusters):
         curr = 0
         neighbours = []
         i = 0
@@ -65,7 +65,7 @@ class Permutation:
             i+=1
         if len(neighbours) < 1:
             print "empty"
-            neighbours.append(random.randint(0,23))
+            neighbours.append(random.randint(0,totalClusters))
         return neighbours
 
     def swapClusters(self, c1, c2):
@@ -219,7 +219,7 @@ class Permutation:
         # go back to deposit
         self.fitness += dist(self.destinations[-1], self.deposit)
 
-    def filePrint(self) :
+    def printOut(self, filePrint) :
         f = open('best-solution.txt', 'w')
         string = "login pp13003 68443\n"
         string += "name Paul Pintilie\n"
@@ -249,8 +249,10 @@ class Permutation:
         # go back to deposit
         # self.fitness += dist(self.destinations[-1], self.deposit)
         string += "->" + str(self.deposit.number+1) + "\n"
-
-        f.write(string)
+        if filePrint:
+            f.write(string)
+            return
+        print string
 
     def plotDestinations(self):
 
