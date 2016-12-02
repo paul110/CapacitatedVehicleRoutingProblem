@@ -1,1 +1,1 @@
-python fruityBun.py fruitybun250.vrp > best-solution.txt
+python fruityBun.py fruitybun250.vrp
