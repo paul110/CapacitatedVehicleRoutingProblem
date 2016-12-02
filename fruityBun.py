@@ -599,7 +599,7 @@ def findPath(deposits, capacity):
     gen = []
 
     labels = get_labels(deposits)
-    total_generations = 5
+    total_generations = 6
     procs = [None]*total_generations
 
     manager = Manager()
@@ -616,7 +616,7 @@ def findPath(deposits, capacity):
     for i in range(1, total_generations):
         solutions =  gen[i].solutions
         mergeSort(solutions)
-        gen[0].addPopulation(solutions[:10])
+        gen[0].addPopulation(solutions[:7])
 
     MUTATION_RATE = 0.4
     gen[0].both(5000)
